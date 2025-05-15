@@ -22,12 +22,15 @@ import Unauthorized from './pages/Unauthorized';
 import PaymentPage from './pages/Payment';
 const queryClient = new QueryClient();
 
+import IdleTimer from './components/IdleTimer';
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
       <Sonner />
       <BrowserRouter>
+        <IdleTimer />
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/about" element={<About />} />
