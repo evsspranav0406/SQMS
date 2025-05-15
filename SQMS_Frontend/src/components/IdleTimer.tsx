@@ -7,10 +7,10 @@ const IdleTimer = () => {
   const warningTimerId = useRef<NodeJS.Timeout | null>(null);
   const logoutTimerId = useRef<NodeJS.Timeout | null>(null);
   const warningTimeout = 60000; // 1 minute warning before logout
-  const idleTimeout = 10* 60 * 1000; // 10 minutes
+  const idleTimeout = 10 * 60 * 1000; // 10 minutes
+  const lastActiveKey = 'lastActiveTime';
 
   const clearTimers = () => {
-    console.log('Clearing timers');
     if (warningTimerId.current) {
       clearTimeout(warningTimerId.current);
     }
@@ -20,9 +20,9 @@ const IdleTimer = () => {
   };
 
   const logout = () => {
-    console.log('Logging out due to inactivity');
     localStorage.removeItem('token');
     localStorage.removeItem('adminToken');
+    localStorage.removeItem(lastActiveKey);
     toast.message('You have been logged out due to inactivity.');
     navigate('/login');
   };
@@ -31,22 +31,33 @@ const IdleTimer = () => {
     clearTimers();
     // Show warning 1 minute before logout
     warningTimerId.current = setTimeout(() => {
-      console.log('Showing warning toast');
       toast.warning('You will be logged out in 1 minute due to inactivity.');
       // Set another timeout for actual logout after warningTimeout
       logoutTimerId.current = setTimeout(() => {
-        console.log('Logout timer triggered');
         logout();
       }, warningTimeout);
     }, idleTimeout - warningTimeout);
   };
 
   const resetTimer = () => {
+    const now = Date.now();
+    localStorage.setItem(lastActiveKey, now.toString());
     startTimer();
   };
 
   useEffect(() => {
-    startTimer();
+
+    // Check last active time on mount
+    const lastActive = localStorage.getItem(lastActiveKey);
+    if (lastActive) {
+      const lastActiveTime = parseInt(lastActive, 10);
+      const now = Date.now();
+      if (now - lastActiveTime > idleTimeout) {
+        logout();
+        return;
+      }
+    }
+    resetTimer();
 
     const events = ['', 'keydown', 'scroll', 'touchstart', 'click', 'mousedown'];
 
@@ -64,7 +75,6 @@ const IdleTimer = () => {
         window.removeEventListener(event, eventHandler);
       }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return null;
