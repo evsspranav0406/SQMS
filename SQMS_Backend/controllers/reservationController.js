@@ -80,7 +80,7 @@ import { parse, formatISO } from 'date-fns';
 export const createReservation = async (req, res) => {
   try {
     const { date, time, guests, specialRequests, menu, payment } = req.body;
-    const userId = req.user.id;
+    const userId = req.user._id;
 
     // Parse date and time as local time explicitly
     const reservationDateTime = parse(`${date} ${time}`, 'yyyy-MM-dd HH:mm', new Date());
@@ -181,7 +181,7 @@ import { format, parseISO } from 'date-fns';
 
 export const getMyReservation = async (req, res) => {
   try {
-    const reservation = await Reservation.findOne({ userId: req.user.id, status: { $in: ['active', 'pending'] } });
+    const reservation = await Reservation.findOne({ userId: req.user._id, status: { $in: ['active', 'pending'] } });
     if (!reservation) return res.status(200).json({ message: 'No active reservation', reservation: null });
 
     // Format date to YYYY-MM-DD if date is ISO string
@@ -208,7 +208,7 @@ export const updateReservation = async (req, res) => {
   try {
     const { date, time, guests, name, phone, email, specialRequests, menu, payment } = req.body;
     const { id } = req.params;
-    const userId = req.user.id;
+    const userId = req.user._id;
 
     console.log('updateReservation called with menu:', menu);
 
@@ -338,7 +338,7 @@ const sendCancellationEmail = async (user, reservation) => {
 export const cancelReservation = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user.id;
+    const userId = req.user._id;
 
     const reservation = await Reservation.findOne({ _id: id, userId });
     if (!reservation) return res.status(404).json({ message: 'Reservation not found' });
@@ -369,7 +369,7 @@ export const cancelReservation = async (req, res) => {
 export const completeReservation = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user.id;
+    const userId = req.user._id;
 
     const reservation = await Reservation.findOne({ _id: id, userId });
     if (!reservation) return res.status(404).json({ message: 'Reservation not found' });
