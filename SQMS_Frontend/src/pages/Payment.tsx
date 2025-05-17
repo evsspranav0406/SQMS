@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'sonner';
+import { v4 as uuidv4 } from 'uuid';
 
 const PaymentPage = () => {
   const navigate = useNavigate();
@@ -29,13 +30,12 @@ const PaymentPage = () => {
         return;
       }
 
-      // Use difference amount if provided, else calculate total
       const amountToPay = difference !== undefined ? Math.abs(difference) : menuItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
       const paymentInfo = {
-        status: difference !== undefined ? (difference > 0 ? 'paid' : 'refund_pending') : 'paid',
+        status: difference !== undefined ? (difference > 0 ? 'paid' : 'refunded') : 'paid',
         amount: amountToPay,
-        transactionId: 'real-or-dummy-transaction-id',
+        transactionId: uuidv4(),
       };
 
       let response;
@@ -63,13 +63,7 @@ const PaymentPage = () => {
         });
       }
 
-      if (paymentInfo.status === 'refund_pending') {
-        toast.success(`Refund of ₹${paymentInfo.amount.toFixed(2)} initiated. You will receive the amount shortly.`);
-      } else {
-        toast.success('Payment successful and reservation confirmed!');
-      }
-
-      navigate('/reserve', { state: { reservation: response.data.reservation } });
+      navigate('/reserve', { state: { reservation: response.data.reservation, paid: true } });
     } catch (error) {
       toast.error('Payment failed or reservation could not be created.');
     } finally {

@@ -11,7 +11,7 @@ import Footer from '@/components/Footer';
 import axios, { AxiosError } from 'axios';
 import { jwtDecode } from 'jwt-decode';
 import { Dialog, DialogActions, DialogContent, DialogTitle } from '@mui/material';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Await } from 'react-router-dom';
 import MenuModal from '@/components/MenuModal';
 
 interface DecodedToken {
@@ -50,8 +50,14 @@ const ReservePage = () => {
   const [openMenuModal, setOpenMenuModal] = useState(false);
   const [selectedMenu, setSelectedMenu] = useState([]);
   const [menuEditDialogOpen, setMenuEditDialogOpen] = useState(false);
-  const [menuEditInitial, setMenuEditInitial] = useState([]);
   const [menuEditContinue, setMenuEditContinue] = useState(false);
+
+  // Commented out useEffect syncing menuEditInitial with selectedMenu
+  // useEffect(() => {
+  //   if (isEditing) {
+  //     setMenuEditInitial(selectedMenu);
+  //   }
+  // }, [selectedMenu, isEditing]);
 
   const hasChanges = () => {
     if (!originalReservation) return false;
@@ -86,7 +92,6 @@ const ReservePage = () => {
     setOpenCancelEditConfirmDialog(false);
   };
 
-  // Added missing handleCancelReservation function
   const handleCancelReservation = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -99,7 +104,7 @@ const ReservePage = () => {
           Authorization: `Bearer ${token}`,
         },
       });
-      toast.success('Reservation cancelled');
+      toast.success('Reservation cancelled & Amount will be refunded');
       setQrCode('');
       setReservationId('');
       setHasReservation(false);
@@ -177,16 +182,14 @@ const ReservePage = () => {
     fetchData();
   }, []);
 
-  // Periodically refresh reservation data every 1 minute to reflect cancellations
   useEffect(() => {
     const interval = setInterval(() => {
       setRefreshToggle(prev => !prev);
-    }, 60000); // 60 seconds
+    }, 60000);
 
     return () => clearInterval(interval);
   }, []);
 
-  // Refetch reservation data when refreshToggle changes
   useEffect(() => {
     const fetchReservation = async () => {
       const token = localStorage.getItem('token');
@@ -228,7 +231,6 @@ const ReservePage = () => {
     fetchReservation();
   }, [refreshToggle]);
 
-  // Modified handleSubmit to only validate and show menu booking dialog, defer reservation creation
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -256,17 +258,13 @@ const ReservePage = () => {
 
     // Show menu booking dialog after validation
     if (isEditing) {
-      // For editing, show dialog to continue with same menu or edit menu
-      setMenuEditInitial(selectedMenu);
       setMenuEditDialogOpen(true);
     } else {
       setOpenMenuBookingDialog(true);
     }
   };
 
-  // New function to create reservation after menu booking decision and payment
-  const createReservationAfterMenu = async (menuItems = [], paymentInfo = { status: 'pending', amount: 0, transactionId: '' }) => {
-    console.log('createReservationAfterMenu called with menuItems:', menuItems);
+  const createReservationAfterMenu = async (menuItems = [], paymentInfo = { status: '', amount: 0, transactionId: '' }) => {
     setIsSubmitting(true);
     try {
       const token = localStorage.getItem('token');
@@ -279,7 +277,7 @@ const ReservePage = () => {
         method,
         url,
         data: {
-          date: format(date, 'yyyy-MM-dd'),
+          date: format(date!, 'yyyy-MM-dd'),
           time,
           guests: Number(guests),
           name,
@@ -298,12 +296,34 @@ const ReservePage = () => {
       setQrCode(response.data.reservation.qrCode);
       setHasReservation(true);
 
-      // After reservation creation, if editing and continuing with same menu, show success toast
-      if (isEditing && menuEditContinue) {
-        toast.success('Reservation updated with existing menu.');
-      } else if (isEditing && !menuEditContinue) {
-        // Navigate to reservation summary page after update with new menu
-        navigate('/reserve', { state: { reservationId: response.data.reservation._id, paid: true } });
+      // Check payment status and navigate accordingly
+      const paymentStatus = response.data.reservation.payment?.status || '';
+      if (isEditing) {
+        if (paymentStatus === 'pending' || paymentStatus === 'refund_pending') {
+          navigate('/payment', {
+            state: {
+              reservationData: response.data.reservation,
+              menuItems,
+              difference: calculateDifference(response.data.reservation.menu || [], menuItems),
+            },
+          });
+        } else {
+          toast.success('Reservation updated with existing menu.');
+          navigate('/reserve', { state: { reservationId: response.data.reservation._id, paid: true } });
+        }
+      } else {
+        // For new reservation, if menu is empty or payment status is refunded, navigate to reserve page instead of payment
+        if (menuItems.length === 0 || paymentStatus === 'refunded') {
+          toast.success('Reservation created without menu.');
+          navigate('/reserve', { state: { reservationId: response.data.reservation._id, paid: true } });
+        } else {
+          navigate('/payment', {
+            state: {
+              reservationData: response.data.reservation,
+              menuItems,
+            },
+          });
+        }
       }
     } catch (err) {
       const error = err as AxiosError<{ message: string }>;
@@ -313,7 +333,6 @@ const ReservePage = () => {
     }
   };
 
-  // Handlers for menu booking dialog after new reservation
   const handleMenuBookingYes = () => {
     setOpenMenuBookingDialog(false);
     setOpenMenuModal(true);
@@ -321,26 +340,64 @@ const ReservePage = () => {
 
   const handleMenuBookingNo = async () => {
     setOpenMenuBookingDialog(false);
-    // Create reservation without menu and payment info
-    await createReservationAfterMenu([], { status: 'paid', amount: 0, transactionId: 'no-menu' });
-    // Redirect to reservation summary page (current page) with paid status
-    navigate('/reserve', { state: { reservationId, paid: true } });
+    await createReservationAfterMenu([], { status: '', amount: 0, transactionId: '' });
+    navigate('/reserve', { state: { reservationId, paid: true, showToast: true } });
   };
 
-  // Handlers for menu edit dialog after reservation update
-  const handleMenuEditContinue = async () => {
+  const handleMenuEditContinue = async (menu) => {
     setMenuEditContinue(true);
     setMenuEditDialogOpen(false);
-    console.log('handleMenuEditContinue called with menuEditInitial:', menuEditInitial);
-    console.log('Current selectedMenu:', selectedMenu);
-    // Update reservation with same menu and send same invoice
-    try {
-      await createReservationAfterMenu(menuEditInitial, { status: 'paid', amount: 0, transactionId: 'continue-same-menu' });
-      setSelectedMenu(menuEditInitial); // Ensure state is updated
-      console.log('SelectedMenu after update:', menuEditInitial);
-      toast.success('Reservation updated with existing menu.');
-      // Navigate to reservation summary page with paid status and showSummary flag
+    if (!hasChanges()) {
+      toast.error('No changes detected. Redirecting to reservation summary.');
+      setIsEditing(false);
       navigate('/reserve', { state: { reservationId, paid: true, showSummary: true }, replace: true });
+      return;
+    }
+    try {
+      // Fetch current reservation payment to preserve it
+      const res = await axios.get(`http://localhost:5000/api/reservations/${reservationId}`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
+      const currentPayment = res.data.reservation.payment || { status: 'paid', amount: res.data.reservation.payment.amount, transactionId: res.data.reservation.payment.transactionId };
+      // Normalize menu to ensure _id is string
+      const normalizedMenu = menu.map(item => ({
+        ...item,
+        _id: typeof item._id === 'object' ? item._id.toString() : item._id,
+      }));
+
+      // If menu is emptied, update payment status to refunded with same amount and transactionId
+      let updatedPayment = currentPayment;
+      if (normalizedMenu.length === 0) {
+        updatedPayment = {
+          status: 'refunded',
+          amount: currentPayment.amount,
+          transactionId: currentPayment.transactionId,
+        };
+      }
+
+      const response = await axios.put(`http://localhost:5000/api/reservations/${reservationId}`, {
+        date: format(date!, 'yyyy-MM-dd'),
+        time,
+        guests: Number(guests),
+        name: res.data.name,
+        phone: res.data.phone,
+        email: res.data.email,
+        specialRequests,
+        menu: normalizedMenu,
+        payment: updatedPayment,
+      }, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
+      setSelectedMenu(normalizedMenu);
+      toast.success('Reservation updated with existing menu.');
+      setIsEditing(false);
+      // Do not navigate to payment page even if payment status is pending or refund_pending
+      navigate('/reserve', { state: { reservationId, paid: true, showSummary: true }, replace: true });
+
     } catch (error) {
       toast.error('Failed to update reservation with existing menu.');
     }
@@ -352,18 +409,14 @@ const ReservePage = () => {
     setOpenMenuModal(true);
   };
 
-  // Handler for confirming menu selection in MenuModal
   const handleMenuConfirm = (cartItems) => {
-    console.log('handleMenuConfirm called with cartItems:', cartItems);
     setSelectedMenu(cartItems);
-    setMenuEditInitial(cartItems); // Update menuEditInitial with latest cart items
     setOpenMenuModal(false);
-    // Redirect to payment page with reservation data and selected menu
     navigate('/payment', {
       state: {
         reservationData: {
           _id: reservationId,
-          date: format(date, 'yyyy-MM-dd'),
+          date: format(date!, 'yyyy-MM-dd'),
           time,
           guests: Number(guests),
           name,
@@ -377,24 +430,22 @@ const ReservePage = () => {
     });
   };
 
-  // Handler for skipping menu booking
   const handleMenuSkip = () => {
     setOpenMenuModal(false);
-    // Redirect to reservation summary page with paid status
     navigate('/reserve', { state: { reservationId, paid: true } });
   };
 
-  // Calculate payment difference between old and new menu
   const calculateDifference = (oldMenu, newMenu) => {
     const oldTotal = oldMenu.reduce((sum, item) => sum + item.price * item.quantity, 0);
     const newTotal = newMenu.reduce((sum, item) => sum + item.price * item.quantity, 0);
     return newTotal - oldTotal;
   };
 
-  // Render reservation summary if paid state is true in location state
   useEffect(() => {
-    if (location.state?.paid) {
+    if (location.state?.paid && location.state?.showToast) {
       toast.success('Payment completed. Reservation confirmed!');
+      // Clear the toast flag so it doesn't show again on refresh
+      window.history.replaceState({}, document.title);
     }
   }, [location.state]);
 
@@ -474,6 +525,7 @@ const ReservePage = () => {
                         </svg>
                       </button>
                     </div>
+              
                     <div className="flex justify-center gap-4 mb-4">
                       <button
                         onClick={() => {
@@ -530,6 +582,17 @@ const ReservePage = () => {
                     <p className="mb-2">{email}</p>
                     <p className="mb-2">{phone}</p>
                     <p className="mb-2">{guests} guests on {format(date!, 'yyyy-MM-dd')} at {time}</p>
+                    <br></br>
+                        {selectedMenu.length === 0 && (
+                      <div className="mb-4">
+                        <button
+                          onClick={() => setOpenMenuModal(true)}
+                          className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark transition"
+                        >
+                          Pre-book Menu
+                        </button>
+                      </div>
+                    )}
                     {selectedMenu.length > 0 && (
                       <div className="mt-4 text-left">
                         <h3 className="font-semibold mb-2">Menu Selected</h3>
@@ -637,38 +700,35 @@ const ReservePage = () => {
           </div>
         </div>
 
-        {/* Dialog for menu booking after new reservation */}
         <Dialog open={openMenuBookingDialog} onClose={() => setOpenMenuBookingDialog(false)}>
           <DialogTitle>Book Menu</DialogTitle>
           <DialogContent>
             Would you like to book a menu for your reservation?
           </DialogContent>
           <DialogActions>
-                          <Button onClick={handleMenuBookingNo} variant="outline">No</Button>
-                          <Button onClick={handleMenuBookingYes} variant="default">Yes</Button>
+            <Button onClick={handleMenuBookingNo} variant="outline">No</Button>
+            <Button onClick={handleMenuBookingYes} variant="default">Yes</Button>
           </DialogActions>
         </Dialog>
 
-        {/* Dialog for menu edit choice after reservation update */}
         <Dialog open={menuEditDialogOpen} onClose={() => setMenuEditDialogOpen(false)}>
           <DialogTitle>Menu Options</DialogTitle>
           <DialogContent>
             Would you like to continue with the same menu or edit your menu selection?
           </DialogContent>
           <DialogActions>
-                          <Button onClick={() => { console.log('Continue button clicked'); handleMenuEditContinue(); }} variant="outline">Continue</Button>
-                          <Button onClick={handleMenuEditEdit} variant="default">Edit</Button>
+            <Button onClick={() => { handleMenuEditContinue(selectedMenu); }} variant="outline">Continue</Button>
+            <Button onClick={handleMenuEditEdit} variant="default">Edit</Button>
           </DialogActions>
         </Dialog>
 
-        {/* Menu modal for selecting or editing menu */}
         <MenuModal
           open={openMenuModal}
           onClose={() => setOpenMenuModal(false)}
           onConfirm={handleMenuConfirm}
           onSkip={handleMenuSkip}
           initialCartItems={selectedMenu.length > 0 ? selectedMenu : undefined}
-          enableConfirmWhenEmpty={false}
+          enableConfirmWhenEmpty={selectedMenu.length>0?true:false}
         />
 
         <Dialog open={openCancelDialog} onClose={() => setOpenCancelDialog(false)}>

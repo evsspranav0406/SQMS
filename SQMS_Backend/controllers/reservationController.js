@@ -8,8 +8,11 @@ import Notification from '../models/Notification.js';
 import { sendNotification } from '../server.js';
 import mongoose from 'mongoose';
 import { ObjectId } from 'mongodb';
+import { v4 as uuidv4 } from 'uuid';
+import { parse, formatISO, parseISO, format } from 'date-fns';
 
 const generateQRCode = async (reservation) => {
+  const totalPrice = reservation.menu?.reduce((sum, item) => sum + (item.price * item.quantity), 0) || 0;
   const qrData = {
     id: reservation._id,
     name: reservation.name,
@@ -19,6 +22,9 @@ const generateQRCode = async (reservation) => {
     date: reservation.date,
     time: reservation.time,
     menu: reservation.menu || [],
+    totalPrice: totalPrice > 0 ? totalPrice : '',
+    paid: totalPrice > 0 ? reservation.payment?.status === 'paid' : '',
+    transactionId: totalPrice > 0 ? reservation.payment.transactionId : '',
   };
 
   const qrString = JSON.stringify(qrData);
@@ -52,7 +58,7 @@ const sendReservationEmail = async (user, reservation, qrCode, subject = 'Reserv
   const totalPrice = reservation.menu?.reduce((sum, item) => sum + (item.price * item.quantity), 0) || 0;
 
   const htmlContent = `
-    <h2>Reservation Confirmed</h2>
+    <h2>${subject}</h2>
     <p><strong>Name:</strong> ${reservation.name}</p>
     <p><strong>Date:</strong> ${reservation.date}</p>
     <p><strong>Time:</strong> ${reservation.time}</p>
@@ -61,8 +67,8 @@ const sendReservationEmail = async (user, reservation, qrCode, subject = 'Reserv
     <p><strong>Pre-Booked Menu:</strong></p>
     ${menuHtml}
     ${reservation.menu?.length ? `<p><strong>Total Price:</strong> ₹${totalPrice.toFixed(2)}</p>` : ''}
+    ${totalPrice > 0 ? `<p><strong>Paid:</strong> ${reservation.payment?.status === 'paid' ? 'Yes' : 'No'}</p>` : ''}
   `;
-
   const attachments = [
     {
       filename: 'reservation-qr.png',
@@ -74,23 +80,15 @@ const sendReservationEmail = async (user, reservation, qrCode, subject = 'Reserv
   await sendEmail(user.email, subject, htmlContent, attachments);
 };
 
-import { parse, formatISO } from 'date-fns';
-
-// Create  Reservation
+// Create Reservation
 export const createReservation = async (req, res) => {
   try {
     const { date, time, guests, specialRequests, menu, payment } = req.body;
     const userId = req.user._id;
 
-    // Parse date and time as local time explicitly
     const reservationDateTime = parse(`${date} ${time}`, 'yyyy-MM-dd HH:mm', new Date());
     const now = new Date();
-
-    // Reject reservation if less than 1 hour from now
     const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
-
-    console.log('Reservation DateTime:', reservationDateTime);
-    console.log('One Hour Later:', oneHourLater);
 
     if (reservationDateTime < oneHourLater) {
       return res.status(400).json({ message: 'Reservations must be made at least 1 hour in advance.' });
@@ -100,13 +98,11 @@ export const createReservation = async (req, res) => {
       return res.status(400).json({ message: 'Reservation date and time must be in the future.' });
     }
 
-    // Check for existing reservation
     const existing = await Reservation.findOne({ userId, status: { $in: ['active', 'pending'] } });
     if (existing) {
       return res.status(400).json({ message: 'You already have an active reservation.' });
     }
 
-    // Get user details from database
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
@@ -117,36 +113,50 @@ export const createReservation = async (req, res) => {
       const menuItems = await MenuItem.find({ _id: { $in: menu.map(item => item._id) } });
       selectedMenu = menuItems.map(item => {
         const menuItem = menu.find(m => m._id.toString() === item._id.toString());
-        return { 
-          itemId: item._id, 
-          name: item.name, 
-          price: item.price, 
-          quantity: menuItem?.quantity || 1 
+        return {
+          itemId: item._id,
+          name: item.name,
+          price: item.price,
+          quantity: menuItem?.quantity || 1,
         };
       });
     }
 
+    const totalPrice = selectedMenu.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const status1 = selectedMenu.length > 0 ? 'paid' : 'pending';
+
+    let transactionIdToUse = '';
+    if (payment && status1 === 'paid') {
+      transactionIdToUse = uuidv4();
+    } else if (payment && payment.transactionId && payment.transactionId !== 'real-or-dummy-transaction-id') {
+      transactionIdToUse = payment.transactionId;
+    } else if (payment && payment.transactionId === 'real-or-dummy-transaction-id') {
+      transactionIdToUse = uuidv4();
+    } else if (selectedMenu.length > 0) {
+      transactionIdToUse = uuidv4();
+    } else {
+      transactionIdToUse = '';
+    }
+
     const reservation = new Reservation({
       userId,
-      name: user.name,    // From user document
-      phone: user.phone,  // From user document
-      email: user.email,  // From user document
+      name: user.name,
+      phone: user.phone,
+      email: user.email,
       guests,
       date,
       time,
       specialRequests,
       menu: selectedMenu,
       payment: payment || {
-        status: 'pending',
-        amount: 0,
-        transactionId: uuidv4()
-      }
+        status: totalPrice > 0 ? (selectedMenu.length > 0 ? 'paid' : 'pending') : '',
+        amount: selectedMenu.length > 0 ? totalPrice : 0,
+        transactionId: status1 === 'paid' ? transactionIdToUse : '',
+      },
     });
-
     reservation.qrCode = await generateQRCode(reservation);
     await reservation.save();
 
-    // Create notification for reservation
     const notificationMessage = `Your reservation for ${date} at ${time} has been confirmed.`;
     const notification = new Notification({
       userId: userId.toString(),
@@ -154,7 +164,6 @@ export const createReservation = async (req, res) => {
     });
     await notification.save();
 
-    // Emit notification via socket.io
     sendNotification(userId.toString(), notification.toObject());
 
     await sendReservationEmail(user, reservation, reservation.qrCode, 'Reservation Confirmation');
@@ -165,7 +174,7 @@ export const createReservation = async (req, res) => {
         const parsedDate = parseISO(formattedReservation.date);
         formattedReservation.date = format(parsedDate, 'yyyy-MM-dd');
       } catch {
-        // If parsing fails, leave date as is
+        // leave as is
       }
     }
 
@@ -177,21 +186,18 @@ export const createReservation = async (req, res) => {
 };
 
 // Get user's current reservation
-import { format, parseISO } from 'date-fns';
-
 export const getMyReservation = async (req, res) => {
   try {
     const reservation = await Reservation.findOne({ userId: req.user._id, status: { $in: ['active', 'pending'] } });
     if (!reservation) return res.status(200).json({ message: 'No active reservation', reservation: null });
 
-    // Format date to YYYY-MM-DD if date is ISO string
     let formattedReservation = reservation.toObject();
     if (formattedReservation.date) {
       try {
         const parsedDate = parseISO(formattedReservation.date);
         formattedReservation.date = format(parsedDate, 'yyyy-MM-dd');
       } catch {
-        // If parsing fails, leave date as is
+        // leave as is
       }
     }
 
@@ -201,22 +207,17 @@ export const getMyReservation = async (req, res) => {
   }
 };
 
-import { v4 as uuidv4 } from 'uuid';
-
 // Update reservation
 export const updateReservation = async (req, res) => {
   try {
-    const { date, time, guests, name, phone, email, specialRequests, menu, payment } = req.body;
+    const { date, time, guests, specialRequests, menu, payment } = req.body;
     const { id } = req.params;
     const userId = req.user._id;
 
-    console.log('updateReservation called with menu:', menu);
-
     const reservation = await Reservation.findOne({ _id: id, userId });
+    console.log(reservation)
     if (!reservation) return res.status(404).json({ message: 'Reservation not found' });
 
-    // Disallow editing if within 2 hours of reservation time
-    // Combine date and time properly to avoid invalid ISO string
     const reservationDateTime = new Date(`${reservation.date}T${reservation.time}:00`);
     const now = new Date();
     const twoHoursLater = new Date(now.getTime() + 2 * 60 * 60 * 1000);
@@ -226,31 +227,29 @@ export const updateReservation = async (req, res) => {
 
     let selectedMenu = [];
     if (menu?.length) {
-      console.log('Filtering menu items with quantity > 0');
-      // Filter out items with quantity <= 0 before processing
       const filteredMenu = menu.filter(item => item.quantity > 0);
-      console.log('Filtered menu:', filteredMenu);
       const menuItems = await MenuItem.find({ _id: { $in: filteredMenu.map(item => new ObjectId(item._id)) } });
       const filteredMenuMap = new Map(filteredMenu.map(m => [m._id, m]));
-      selectedMenu = menuItems.map(item => {
+      /*selectedMenu = menuItems.map(item => {
         const menuItem = filteredMenuMap.get(item._id.toString());
-        console.log('Mapping menu item:', item._id.toString(), 'Found in filteredMenu:', menuItem);
-        return { itemId: item._id, name: item.name, price: item.price, quantity: menuItem?.quantity || 1 };
-      });
-      console.log('Selected menu after mapping:', selectedMenu);
-    }
+        return { itemId: item._id, name: item.name, price: item.price, quantity: menuItem?.quantity || 1 }; 
+      });*/
+      selectedMenu=menu
+      console.log(filteredMenu)
+      console.log(menuItems)
+    } 
+    console.log(menu)
+    console.log(selectedMenu)
 
-    // Calculate old and new total amounts
     const oldTotal = reservation.menu?.reduce((sum, item) => sum + item.price * item.quantity, 0) || 0;
     const newTotal = selectedMenu.reduce((sum, item) => sum + item.price * item.quantity, 0);
-
-    // Calculate difference
     const difference = newTotal - oldTotal;
- const user = await User.findById(userId);
+
+    const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
-    // Update reservation fields
+
     reservation.date = date;
     reservation.time = time;
     reservation.guests = guests;
@@ -260,28 +259,33 @@ export const updateReservation = async (req, res) => {
     reservation.specialRequests = specialRequests;
     reservation.menu = selectedMenu;
 
-    // Handle payment update based on difference
     if (difference > 0) {
-      // Additional payment required
       reservation.payment = {
-        status: 'pending',
+        status: 'paid',
         amount: difference,
         transactionId: uuidv4(),
       };
     } else if (difference < 0) {
-      // Refund required
-      reservation.payment = {
-        status: 'refund_pending',
-        amount: Math.abs(difference),
-        transactionId: uuidv4(),
-      };
+      // If menu is emptied (length 0), set payment status to refunded with same amount and transactionId
+      if (menu.length === 0) {
+        reservation.payment = {
+          status: 'refunded',
+          amount: reservation.payment.amount,
+          transactionId: reservation.payment.transactionId,
+        };
+      } else {
+        reservation.payment = {
+          status: 'refund_pending...',
+          amount: Math.abs(difference),
+          transactionId: uuidv4(),
+        };
+      }
     } else {
-      // No change in payment
-      reservation.payment = payment || {
-        status: 'pending',
-        amount: 0,
-        transactionId: '',
-      };
+      // Keep existing payment if no difference
+      if (payment) {
+        reservation.payment = payment;
+      }
+      // else keep existing payment as is (do not overwrite)
     }
 
     reservation.qrCode = await generateQRCode(reservation);
@@ -296,7 +300,7 @@ export const updateReservation = async (req, res) => {
         const parsedDate = parseISO(formattedReservation.date);
         formattedReservation.date = format(parsedDate, 'yyyy-MM-dd');
       } catch {
-        // If parsing fails, leave date as is
+        // leave as is
       }
     }
 
@@ -308,7 +312,6 @@ export const updateReservation = async (req, res) => {
 };
 
 // Cancel reservation
-// Send cancellation email
 const sendCancellationEmail = async (user, reservation) => {
   const transporter = nodemailer.createTransport({
     service: 'gmail',
@@ -343,8 +346,6 @@ export const cancelReservation = async (req, res) => {
     const reservation = await Reservation.findOne({ _id: id, userId });
     if (!reservation) return res.status(404).json({ message: 'Reservation not found' });
 
-    // Disallow canceling if within 2 hours of reservation time
-    // Combine date and time properly to avoid invalid ISO string
     const reservationDateTime = new Date(`${reservation.date}T${reservation.time}:00`);
     const now = new Date();
     const twoHoursLater = new Date(now.getTime() + 2 * 60 * 60 * 1000);
@@ -353,12 +354,47 @@ export const cancelReservation = async (req, res) => {
     }
 
     reservation.status = 'cancelled';
+
+    if (reservation.status === 'cancelled' && reservation.payment.status === 'paid') {
+      reservation.payment.status = 'refunded';
+    }
+
     await reservation.save();
 
     const user = await User.findById(userId);
-    await sendCancellationEmail(user, reservation);
 
-    res.json({ message: 'Reservation cancelled' });
+    const refundMessage = reservation.payment && reservation.payment.status === 'refunded'
+      ? `<p>Your paid amount of ₹${reservation.payment.amount.toFixed(2)} will be refunded shortly.</p>`
+      : '';
+
+    const cancellationEmailHtml = `
+      <h2>Your Reservation Has Been Cancelled</h2>
+      <p><strong>Name:</strong> ${reservation.name}</p>
+      <p><strong>Date:</strong> ${reservation.date}</p>
+      <p><strong>Time:</strong> ${reservation.time}</p>
+      <p><strong>Guests:</strong> ${reservation.guests}</p>
+      ${refundMessage}
+      <p>If this was a mistake, feel free to make another reservation.</p>
+    `;
+
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: user.email,
+      subject: 'Reservation Cancelled - Food Techie',
+      html: cancellationEmailHtml,
+    };
+
+    await transporter.sendMail(mailOptions);
+
+    res.json({ message: 'Reservation cancelled', refund: refundMessage ? `Refund of ₹${reservation.payment.amount.toFixed(2)} is in process.` : 'No refund applicable.' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Error cancelling reservation' });
@@ -374,9 +410,6 @@ export const completeReservation = async (req, res) => {
     const reservation = await Reservation.findOne({ _id: id, userId });
     if (!reservation) return res.status(404).json({ message: 'Reservation not found' });
 
-    // Combine date and time properly to avoid invalid ISO string
-    const reservationDateTime = new Date(`${reservation.date}T${reservation.time}:00`);
-
     reservation.status = 'completed';
     await reservation.save();
 
@@ -387,13 +420,12 @@ export const completeReservation = async (req, res) => {
   }
 };
 
-// Cancel reservations that are more than 30 minutes past their reservation time
+// Auto-cancel expired reservations
 export const autoCancelExpiredReservations = async (req, res) => {
   try {
     const now = new Date();
-    const cutoffTime = new Date(now.getTime() - 30 * 60 * 1000); // 30 minutes ago
+    const cutoffTime = new Date(now.getTime() - 30 * 60 * 1000);
 
-    // Find reservations with status active or pending and reservation datetime before cutoffTime
     const expiredReservations = await Reservation.find({
       status: { $in: ['active', 'pending'] },
       $expr: {
@@ -408,7 +440,6 @@ export const autoCancelExpiredReservations = async (req, res) => {
       reservation.status = 'cancelled';
       await reservation.save();
 
-      // Send cancellation email
       const user = await User.findById(reservation.userId);
       if (user) {
         await sendCancellationEmail(user, reservation);
@@ -419,5 +450,30 @@ export const autoCancelExpiredReservations = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Error auto-cancelling expired reservations' });
+  }
+};
+
+export const getReservationById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user._id;
+
+    const reservation = await Reservation.findOne({ _id: id, userId });
+    if (!reservation) return res.status(404).json({ message: 'Reservation not found' });
+
+    let formattedReservation = reservation.toObject();
+    if (formattedReservation.date) {
+      try {
+        const parsedDate = parseISO(formattedReservation.date);
+        formattedReservation.date = format(parsedDate, 'yyyy-MM-dd');
+      } catch {
+        // leave as is
+      }
+    }
+
+    res.json({ reservation: formattedReservation });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error fetching reservation' });
   }
 };
