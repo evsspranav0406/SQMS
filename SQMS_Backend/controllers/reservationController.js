@@ -3,6 +3,8 @@ import MenuItem from '../models/MenuItem.js';
 import QRCode from 'qrcode';
 import nodemailer from 'nodemailer';
 import User from '../models/User.js';
+import Table from '../models/Table.js';
+import Waiter from '../models/Waiter.js';
 import { sendEmail } from '../utils/sendEmail.js';
 import Notification from '../models/Notification.js';
 import { sendNotification } from '../server.js';
@@ -10,6 +12,7 @@ import mongoose from 'mongoose';
 import { ObjectId } from 'mongodb';
 import { v4 as uuidv4 } from 'uuid';
 import { parse, formatISO, parseISO, format } from 'date-fns';
+import { parseAndFormatDate } from '../utils/dateUtils.js';
 
 const generateQRCode = async (reservation) => {
   const totalPrice = reservation.menu?.reduce((sum, item) => sum + (item.price * item.quantity), 0) || 0;
@@ -24,12 +27,13 @@ const generateQRCode = async (reservation) => {
     menu: reservation.menu || [],
     totalPrice: totalPrice > 0 ? totalPrice : '',
     paid: totalPrice > 0 ? reservation.payment?.status === 'paid' : '',
-    transactionId: totalPrice > 0 ? reservation.payment.transactionId : '',
+    transactionIds: totalPrice > 0 ? reservation.payment.transactionId : '',
   };
 
   const qrString = JSON.stringify(qrData);
   return await QRCode.toDataURL(qrString);
 };
+
 
 const sendReservationEmail = async (user, reservation, qrCode, subject = 'Reservation Confirmation') => {
   const menuHtml = reservation.menu?.length
@@ -57,10 +61,16 @@ const sendReservationEmail = async (user, reservation, qrCode, subject = 'Reserv
 
   const totalPrice = reservation.menu?.reduce((sum, item) => sum + (item.price * item.quantity), 0) || 0;
 
+  let formattedDate = reservation.date;
+  try {
+    const parsedDate = parseISO(reservation.date);
+    formattedDate = format(parsedDate, 'yyyy-MM-dd');
+  } catch {}
+
   const htmlContent = `
     <h2>${subject}</h2>
     <p><strong>Name:</strong> ${reservation.name}</p>
-    <p><strong>Date:</strong> ${reservation.date}</p>
+    <p><strong>Date:</strong> ${formattedDate}</p>
     <p><strong>Time:</strong> ${reservation.time}</p>
     <p><strong>Guests:</strong> ${reservation.guests}</p>
     <p><strong>Special Requests:</strong> ${reservation.specialRequests || 'None'}</p>
@@ -86,7 +96,12 @@ export const createReservation = async (req, res) => {
     const { date, time, guests, specialRequests, menu, payment } = req.body;
     const userId = req.user._id;
 
-    const reservationDateTime = parse(`${date} ${time}`, 'yyyy-MM-dd HH:mm', new Date());
+    const formattedDate = parseAndFormatDate(date);
+    if (!formattedDate) {
+      return res.status(400).json({ message: 'Invalid date format. Please use YYYY-MM-DD.' });
+    }
+
+    const reservationDateTime = parse(`${formattedDate} ${time}`, 'yyyy-MM-dd HH:mm', new Date());
     const now = new Date();
     const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
 
@@ -138,31 +153,41 @@ export const createReservation = async (req, res) => {
       transactionIdToUse = '';
     }
 
+    const paymentToSave = {
+      status: totalPrice > 0 ? (selectedMenu.length > 0 ? 'paid' : 'pending') : '',
+      amount: selectedMenu.length > 0 ? totalPrice : 0,
+      transactionIds: [],
+    };
+
+    if (payment && payment.transactionId && payment.transactionId !== 'real-or-dummy-transaction-id') {
+      paymentToSave.transactionIds = [payment.transactionId];
+    } else if (status1 === 'paid') {
+      paymentToSave.transactionIds = [transactionIdToUse];
+    }
+
     const reservation = new Reservation({
       userId,
       name: user.name,
       phone: user.phone,
       email: user.email,
       guests,
-      date,
+      date: formattedDate,
       time,
       specialRequests,
       menu: selectedMenu,
-      payment: payment || {
-        status: totalPrice > 0 ? (selectedMenu.length > 0 ? 'paid' : 'pending') : '',
-        amount: selectedMenu.length > 0 ? totalPrice : 0,
-        transactionId: status1 === 'paid' ? transactionIdToUse : '',
-      },
+      payment: paymentToSave,
     });
     reservation.qrCode = await generateQRCode(reservation);
     await reservation.save();
 
-    const notificationMessage = `Your reservation for ${date} at ${time} has been confirmed.`;
+    const notificationMessage = `Your reservation for ${formattedDate} at ${time} has been confirmed.`;
     const notification = new Notification({
-      userId: userId.toString(),
+      userId: mongoose.Types.ObjectId(userId),
       message: notificationMessage,
     });
+    console.log('Saving notification:', notification);
     await notification.save();
+    console.log('Notification saved:', notification);
 
     sendNotification(userId.toString(), notification.toObject());
 
@@ -188,7 +213,9 @@ export const createReservation = async (req, res) => {
 // Get user's current reservation
 export const getMyReservation = async (req, res) => {
   try {
-    const reservation = await Reservation.findOne({ userId: req.user._id, status: { $in: ['active', 'pending'] } });
+    const reservation = await Reservation.findOne({ userId: req.user._id, status: { $in: ['active', 'pending', 'checked-in'] } })
+      .populate('table')
+      .populate('waiter');
     if (!reservation) return res.status(200).json({ message: 'No active reservation', reservation: null });
 
     let formattedReservation = reservation.toObject();
@@ -214,11 +241,16 @@ export const updateReservation = async (req, res) => {
     const { id } = req.params;
     const userId = req.user._id;
 
+    const formattedDate = parseAndFormatDate(date);
+    if (!formattedDate) {
+      return res.status(400).json({ message: 'Invalid date format. Please use YYYY-MM-DD.' });
+    }
+
     const reservation = await Reservation.findOne({ _id: id, userId });
     console.log(reservation)
     if (!reservation) return res.status(404).json({ message: 'Reservation not found' });
 
-    const reservationDateTime = new Date(`${reservation.date}T${reservation.time}:00`);
+    const reservationDateTime = parse(`${formattedDate} ${time}`, 'yyyy-MM-dd HH:mm', new Date());
     const now = new Date();
     const twoHoursLater = new Date(now.getTime() + 2 * 60 * 60 * 1000);
     if (twoHoursLater > reservationDateTime) {
@@ -250,7 +282,7 @@ export const updateReservation = async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    reservation.date = date;
+    reservation.date = formattedDate;
     reservation.time = time;
     reservation.guests = guests;
     reservation.name = user.name;
@@ -260,24 +292,27 @@ export const updateReservation = async (req, res) => {
     reservation.menu = selectedMenu;
 
     if (difference > 0) {
+      const totalPaidSoFar = reservation.payment?.amount || 0;
+      const existingTransactionIds = reservation.payment?.transactionIds || [];
       reservation.payment = {
         status: 'paid',
-        amount: difference,
-        transactionId: uuidv4(),
+        amount: totalPaidSoFar + difference,
+        transactionIds: [...existingTransactionIds, uuidv4()],
       };
     } else if (difference < 0) {
-      // If menu is emptied (length 0), set payment status to refunded with same amount and transactionId
+      // If menu is emptied (length 0), set payment status to refunded with same amount and transactionIds
       if (menu.length === 0) {
         reservation.payment = {
           status: 'refunded',
           amount: reservation.payment.amount,
-          transactionId: reservation.payment.transactionId,
+          transactionIds: reservation.payment.transactionIds,
         };
       } else {
+        const existingTransactionIds = reservation.payment?.transactionIds || [];
         reservation.payment = {
           status: 'refund_pending...',
           amount: Math.abs(difference),
-          transactionId: uuidv4(),
+          transactionIds: [...existingTransactionIds, uuidv4()],
         };
       }
     } else {
@@ -321,6 +356,12 @@ const sendCancellationEmail = async (user, reservation) => {
     },
   });
 
+  let formattedDate = reservation.date;
+  try {
+    const parsedDate = parseISO(reservation.date);
+    formattedDate = format(parsedDate, 'yyyy-MM-dd');
+  } catch {}
+
   const mailOptions = {
     from: process.env.EMAIL_USER,
     to: user.email,
@@ -328,7 +369,7 @@ const sendCancellationEmail = async (user, reservation) => {
     html: `
       <h2>Your Reservation Has Been Cancelled</h2>
       <p><strong>Name:</strong> ${reservation.name}</p>
-      <p><strong>Date:</strong> ${reservation.date}</p>
+      <p><strong>Date:</strong> ${formattedDate}</p>
       <p><strong>Time:</strong> ${reservation.time}</p>
       <p><strong>Guests:</strong> ${reservation.guests}</p>
       <p>If this was a mistake, feel free to make another reservation.</p>
@@ -346,7 +387,7 @@ export const cancelReservation = async (req, res) => {
     const reservation = await Reservation.findOne({ _id: id, userId });
     if (!reservation) return res.status(404).json({ message: 'Reservation not found' });
 
-    const reservationDateTime = new Date(`${reservation.date}T${reservation.time}:00`);
+    const reservationDateTime = parse(`${reservation.date} ${reservation.time}`, 'yyyy-MM-dd HH:mm', new Date());
     const now = new Date();
     const twoHoursLater = new Date(now.getTime() + 2 * 60 * 60 * 1000);
     if (twoHoursLater > reservationDateTime) {
@@ -360,6 +401,18 @@ export const cancelReservation = async (req, res) => {
     }
 
     await reservation.save();
+
+    // Decrement waiter currentTableCount and update status
+    if (reservation.waiter) {
+      const waiter = await Waiter.findById(reservation.waiter);
+      if (waiter) {
+        waiter.currentTableCount = Math.max((waiter.currentTableCount || 1) - 1, 0);
+        if (waiter.currentTableCount < 5) {
+          waiter.status = 'available';
+        }
+        await waiter.save();
+      }
+    }
 
     const user = await User.findById(userId);
 
@@ -401,17 +454,57 @@ export const cancelReservation = async (req, res) => {
   }
 };
 
+//completed mail
+const sendCheckoutEmail = async (user) => {
+  const subject = 'Thank You for Dining with Us at Food Techie!';
+  const htmlContent = `
+    <p>Dear,${user.name},</p>
+    <p>Thank you for choosing <strong>Food Techie Restaurant</strong> for your recent dining experience. We’re truly delighted to have had the opportunity to serve you.</p>
+    <p>We hope you enjoyed your meal and had a wonderful time with us. At Food Techie, we are committed to delivering delicious food and memorable service, and your satisfaction is our top priority.</p>
+    <p>We look forward to welcoming you again soon. If you have any feedback or suggestions, please don’t hesitate to share—we’re always eager to improve and serve you better.</p>
+    <p>We hope you have a great dining experience!</p>
+    <p>Warm regards,</p>
+    <p>The Food Techie Team</p>
+
+    `;
+
+  await sendEmail(user.email, subject, htmlContent);
+};
 // Mark reservation as completed
 export const completeReservation = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user._id;
 
-    const reservation = await Reservation.findOne({ _id: id, userId });
+    const reservation = await Reservation.findById(id);
     if (!reservation) return res.status(404).json({ message: 'Reservation not found' });
 
     reservation.status = 'completed';
     await reservation.save();
+
+    // Decrement waiter currentTableCount and update status
+    if (reservation.waiter) {
+      const waiter = await Waiter.findById(reservation.waiter);
+      if (waiter) {
+        waiter.currentTableCount = Math.max((waiter.currentTableCount || 1) - 1, 0);
+        if (waiter.currentTableCount < 5) {
+          waiter.status = 'available';
+        }
+        await waiter.save();
+      }
+    }
+
+    if (reservation.table) {
+        const table = await Table.findById(reservation.table);
+        if (table) {
+          table.status = 'available';
+          }
+          await table.save();
+        }
+
+    const user = await User.findById(reservation.userId);
+    if (user) {
+      await sendCheckoutEmail(user);
+    }
 
     res.json({ message: 'Reservation marked as completed', reservation });
   } catch (err) {
@@ -420,45 +513,13 @@ export const completeReservation = async (req, res) => {
   }
 };
 
-// Auto-cancel expired reservations
-export const autoCancelExpiredReservations = async (req, res) => {
-  try {
-    const now = new Date();
-    const cutoffTime = new Date(now.getTime() - 30 * 60 * 1000);
 
-    const expiredReservations = await Reservation.find({
-      status: { $in: ['active', 'pending'] },
-      $expr: {
-        $lt: [
-          { $dateFromString: { dateString: { $concat: ['$date', 'T', '$time', ':00'] } } },
-          cutoffTime,
-        ],
-      },
-    });
-
-    for (const reservation of expiredReservations) {
-      reservation.status = 'cancelled';
-      await reservation.save();
-
-      const user = await User.findById(reservation.userId);
-      if (user) {
-        await sendCancellationEmail(user, reservation);
-      }
-    }
-
-    res.json({ message: `Cancelled ${expiredReservations.length} expired reservations.` });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Error auto-cancelling expired reservations' });
-  }
-};
 
 export const getReservationById = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user._id;
 
-    const reservation = await Reservation.findOne({ _id: id, userId });
+    const reservation = await Reservation.findById(id);
     if (!reservation) return res.status(404).json({ message: 'Reservation not found' });
 
     let formattedReservation = reservation.toObject();
@@ -475,5 +536,203 @@ export const getReservationById = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Error fetching reservation' });
+  }
+};
+
+export const getActiveReservationById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const reservation = await Reservation.findById(id);
+    if (!reservation) return res.status(404).json({ message: 'Reservation not found' });
+
+    if (!['active', 'pending'].includes(reservation.status)) {
+      return res.status(400).json({ message: 'Reservation is not active or pending' });
+    }
+
+    let formattedReservation = reservation.toObject();
+    if (formattedReservation.date) {
+      try {
+        const parsedDate = parseISO(formattedReservation.date);
+        formattedReservation.date = format(parsedDate, 'yyyy-MM-dd');
+      } catch {
+        // leave as is
+      }
+    }
+
+    res.json({ reservation: formattedReservation });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error fetching reservation' });
+  }
+};
+
+// New controller to get reservation by reservationId, phone or email
+export const getReservationByQuery = async (req, res) => {
+  try {
+    const { query } = req.query;
+    if (!query) {
+      return res.status(400).json({ message: 'Query parameter is required' });
+    }
+
+    let reservation = null;
+
+    // Check if query is a valid MongoDB ObjectId
+    if (mongoose.Types.ObjectId.isValid(query)) {
+      reservation = await Reservation.findById(query);
+    }
+
+    // If not found by ID, try to find by phone or email
+    if (!reservation) {
+      reservation = await Reservation.findOne({
+        $or: [
+          { phone: query },
+          { email: query }
+        ]
+      });
+    }
+
+    if (!reservation) {
+      return res.status(404).json({ message: 'Reservation not found' });
+    }
+
+    let formattedReservation = reservation.toObject();
+    if (formattedReservation.date) {
+      try {
+        const parsedDate = parseISO(formattedReservation.date);
+        formattedReservation.date = format(parsedDate, 'yyyy-MM-dd');
+      } catch {
+        // leave as is
+      }
+    }
+
+    res.json({ reservation: formattedReservation });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error fetching reservation' });
+  }
+};
+
+const sendCheckInEmail = async (user, table, waiter) => {
+  const subject = 'Reservation Checked In - Table and Waiter Assigned';
+
+  let formattedDate = '';
+  try {
+    if (user.reservation && user.reservation.date) {
+      const parsedDate = parseISO(user.reservation.date);
+      formattedDate = format(parsedDate, 'yyyy-MM-dd');
+    }
+  } catch {}
+
+  const htmlContent = `
+    <h2>Your Reservation is Checked In</h2>
+    <p>Dear,${user.name} thanks for choosing our restaurant</p>
+    <p>You have been allocated with table number is: <strong>${table.tableNumber}</strong></p>
+    <p>Your assigned waiter is: <strong>${waiter.name}</strong></p>
+    <p>We hope you have a great dining experience!</p>
+  `;
+  await sendEmail(user.email, subject, htmlContent);
+};
+
+export const checkInReservation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const qrData = req.body;
+
+    const reservation = await Reservation.findById(id);
+    if (!reservation) {
+      return res.status(404).json({ message: 'Reservation not found' });
+    }
+
+    if (reservation.status === 'checked-in') {
+      return res.status(400).json({ message: 'Reservation is already checked in' });
+    }
+    if (reservation.status === 'completed') {
+      return res.status(400).json({ message: 'Reservation is already completed' });
+    }
+    if (!['active', 'pending'].includes(reservation.status)) {
+      return res.status(400).json({ message: 'Reservation cannot be checked in' });
+    }
+
+    // Validate QR fields: guests, menu, time, date
+    if (qrData.guests !== reservation.guests) {
+      return res.status(400).json({ message: 'Guest count does not match reservation' });
+    }
+
+    if (qrData.date !== reservation.date) {
+      return res.status(400).json({ message: 'Reservation date does not match' });
+    }
+
+    if (qrData.time !== reservation.time) {
+      return res.status(400).json({ message: 'Reservation time does not match' });
+    }
+
+    // Validate menu items: check if menu arrays match in length and items
+    if (Array.isArray(qrData.menu) && Array.isArray(reservation.menu)) {
+      if (qrData.menu.length !== reservation.menu.length) {
+        return res.status(400).json({ message: 'Menu items count does not match reservation' });
+      }
+      for (let i = 0; i < qrData.menu.length; i++) {
+        const qrItem = qrData.menu[i];
+        const resItem = reservation.menu[i];
+        if (qrItem.name !== resItem.name || qrItem.quantity !== resItem.quantity) {
+          return res.status(400).json({ message: 'Menu items do not match reservation' });
+        }
+      }
+    } else if (qrData.menu || reservation.menu) {
+      // One is array and other is not
+      return res.status(400).json({ message: 'Menu data invalid or does not match' });
+    }
+
+    // Find suitable available table
+    const suitableTable = await Table.findOne({
+      capacity: { $gte: reservation.guests },
+      status: 'available',
+    }).sort({ capacity: 1 });
+
+    if (!suitableTable) {
+      return res.status(400).json({ message: 'No suitable table available' });
+    }
+
+    // Find available waiter with less than 5 tables assigned
+    const availableWaiter = await Waiter.findOne({ currentTableCount: { $lt: 5 } }).sort({ currentTableCount: 1 });
+    if (!availableWaiter) {
+      return res.status(400).json({ message: 'No available waiter' });
+    }
+
+    // Update reservation status
+    reservation.status = 'checked-in';
+    reservation.table = suitableTable._id;
+    reservation.waiter = availableWaiter._id;
+    await reservation.save();
+
+    // Update table status
+    suitableTable.status = 'occupied';
+    suitableTable.currentReservationId = reservation._id;
+    await suitableTable.save();
+
+    // Update waiter currentTableCount and status
+    availableWaiter.currentTableCount = (availableWaiter.currentTableCount || 0) + 1;
+    if (availableWaiter.currentTableCount >= 5) {
+      availableWaiter.status = 'occupied';
+    } else {
+      availableWaiter.status = 'available';
+    }
+    await availableWaiter.save();
+
+    // Populate table and waiter before sending response
+    const populatedReservation = await Reservation.findById(reservation._id)
+      .populate('table')
+      .populate('waiter');
+    // Get user for email
+    const user = await User.findById(reservation.userId);
+    if (user) {
+      await sendCheckInEmail(user, populatedReservation.table, populatedReservation.waiter);
+    }
+
+    res.json({ reservation: populatedReservation });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error during check-in' });
   }
 };

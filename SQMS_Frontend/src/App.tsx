@@ -17,9 +17,14 @@ import AdminLogin from './pages/AdminLogin';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminMenuPage from './pages/AdminMenuPage';
 import AdminReservations from './pages/AdminReservation';
+import AdminTables from './pages/AdminTables';
+import AdminWaiters from './pages/AdminWaiters';
 import AdminRoute from '@/components/AdminRoute';
 import Unauthorized from './pages/Unauthorized';
 import PaymentPage from './pages/Payment';
+import AdminCheckin from './pages/AdminCheckin';
+import AdminTableAdd from './pages/AdminTableAdd';
+import AdminWaiterAdd from './pages/AdminWaiterAdd';
 const queryClient = new QueryClient();
 
 import IdleTimer from './components/IdleTimer';
@@ -39,10 +44,7 @@ const App = () => (
           <Route path="/reset-password/:token" element={<ResetPassword />} />
 
           {/* Protected Routes */}
-          
-         
-        <Route
-        
+          <Route
             path="/reserve"
             element={
               <ProtectedRoute>
@@ -50,13 +52,18 @@ const App = () => (
               </ProtectedRoute>
             }
           />
-          <Route path='/payment' element={<PaymentPage/>}/>
+          <Route path="/payment" element={<PaymentPage />} />
           <Route path="/menu" element={<Menu />} />
           <Route path="/admin/login" element={<AdminLogin />} />
-          <Route path="/admin/dashboard" element={<AdminRoute><AdminDashboard/></AdminRoute>} />
-          <Route path="/admin/menu" element={<AdminRoute><AdminMenuPage/></AdminRoute>} />
-          <Route path='/admin/menu/add' element={<AdminRoute><AdminMenuItem/></AdminRoute>} />
-          <Route path='/admin/reservations' element={<AdminRoute><AdminReservations/></AdminRoute>} />
+          <Route path="/admin/dashboard" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
+          <Route path="/admin/menu" element={<AdminRoute><AdminMenuPage /></AdminRoute>} />
+          <Route path="/admin/menu/add" element={<AdminRoute><AdminMenuItem /></AdminRoute>} />
+          <Route path="/admin/tables/add" element={<AdminRoute><AdminTableAdd /></AdminRoute>} />
+          <Route path="/admin/waiters/add" element={<AdminRoute><AdminWaiterAdd /></AdminRoute>} />
+          <Route path="/admin/reservations" element={<AdminRoute><AdminReservations /></AdminRoute>} />
+          <Route path="/admin/checkin" element={<AdminRoute><AdminCheckin /></AdminRoute>} />
+          <Route path="/admin/tables" element={<AdminRoute><AdminTables /></AdminRoute>} />
+          <Route path="/admin/waiters" element={<AdminRoute><AdminWaiters /></AdminRoute>} />
           <Route path="*" element={<NotFound />} />
           <Route path="/unauthorized" element={<Unauthorized />} />
         </Routes>

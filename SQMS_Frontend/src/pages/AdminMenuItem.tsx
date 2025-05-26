@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import AdminLayout from '../components/AdminLayout';
 
 const AddMenuItem = () => {
   const [name, setName] = useState('');
@@ -24,7 +25,7 @@ const AddMenuItem = () => {
     try {
       await axios.post('http://localhost:5000/api/menu/add', newItem);
       toast.success('Menu item added successfully! 🍽️');
-      setTimeout(() => navigate('/admin/menu'), 1500);
+      setTimeout(() => navigate('/admin/menu'), 500);
     } catch (err) {
       console.error('Failed to add menu item:', err);
       toast.error('Something went wrong. Please try again.');
@@ -32,6 +33,7 @@ const AddMenuItem = () => {
   };
 
   return (
+    <AdminLayout>
     <div className="max-w-2xl mx-auto p-8 bg-white rounded-lg shadow-md mt-10">
       <h2 className="text-3xl font-bold text-center mb-6 text-gray-800">
         Add New Menu Item
@@ -94,6 +96,7 @@ const AddMenuItem = () => {
         </Button>
       </form>
     </div>
+    </AdminLayout>
   );
 };
 

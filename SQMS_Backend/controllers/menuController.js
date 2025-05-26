@@ -39,15 +39,20 @@ export const addMenuItem = async (req, res) => {
     }
   };
   
-  // Delete a menu item
-  export const deleteMenuItem = async (req, res) => {
-    try {
-      await MenuItem.findByIdAndDelete(req.params.id);
-      res.json({ message: 'Menu item deleted' });
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to delete menu item' });
+export const deleteMenuItem = async (req, res) => {
+  try {
+    console.log('Received delete request for menu item id:', req.params.id);
+    const deletedItem = await MenuItem.findByIdAndDelete(req.params.id);
+    if (!deletedItem) {
+      console.log('Menu item not found for id:', req.params.id);
+      return res.status(404).json({ error: 'Menu item not found' });
     }
-  };
+    res.json({ message: 'Menu item deleted' });
+  } catch (err) {
+    console.error('Error deleting menu item:', err);
+    res.status(500).json({ error: 'Failed to delete menu item' });
+  }
+};
 
   export const getfeatured = async (req, res) => {
     try {

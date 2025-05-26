@@ -24,6 +24,7 @@ interface Notification {
 
 const socket = io(import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000', {
   autoConnect: false,
+  transports: ['websocket', 'polling'],
 });
 
 const Navbar = () => {
@@ -88,7 +89,45 @@ const Navbar = () => {
 
   const unreadCount = Array.isArray(notifications) ? notifications.filter((n) => !n.isRead).length : 0;
 
+  const markAllAsRead = async (token: string) => {
+    try {
+      // Mark all unread notifications as read by calling backend API for each unread notification
+      const unreadNotifications = notifications.filter((n) => !n.isRead);
+      const results = await Promise.all(
+        unreadNotifications.map(async (notification) => {
+          try {
+            const response = await axios.put(
+              `http://localhost:5000/api/notifications/${notification._id.trim()}/read`,
+              {},
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
+            console.log(`Marked notification ${notification._id} as read`, response.data);
+            return response.data;
+          } catch (err) {
+            console.error(`Failed to mark notification ${notification._id} as read`, err);
+            return null;
+          }
+        })
+      );
+      // Update local state to mark all as read only for successful updates
+      setNotifications((prev) =>
+        prev.map((n) => {
+          const updated = results.find((r) => r && r._id === n._id);
+          return updated ? { ...n, isRead: true } : n;
+        })
+      );
+    } catch (error) {
+      console.error('Failed to mark notifications as read', error);
+    }
+  };
+
   const toggleNotifications = () => {
+    if (!showNotifications) {
+      const token = localStorage.getItem('token');
+      if (token) {
+        markAllAsRead(token);
+      }
+    }
     setShowNotifications(!showNotifications);
   };
 

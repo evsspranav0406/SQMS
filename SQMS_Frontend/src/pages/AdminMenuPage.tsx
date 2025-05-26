@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
 import { Edit, Trash, ArrowUpDown } from 'lucide-react';
+import AdminLayout from '../components/AdminLayout';
 
 type MenuItem = {
   _id: string;
@@ -24,7 +25,7 @@ const AdminMenuPage = () => {
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [editFormData, setEditFormData] = useState<MenuItem | null>(null);
 
-  const itemsPerPage = 50;
+  const itemsPerPage = 20;
 
   useEffect(() => {
     const fetchMenuItems = async () => {
@@ -81,6 +82,7 @@ const AdminMenuPage = () => {
   }, [sortedItems, currentPage]);
 
   const handleDelete = async (id: string) => {
+    console.log('Deleting menu item with id:', id);
     try {
       await axios.delete(`http://localhost:5000/api/menu/${id}`);
       setMenuItems(menuItems.filter(item => item._id !== id));
@@ -150,6 +152,7 @@ const AdminMenuPage = () => {
   };
 
   return (
+    <AdminLayout>
     <div className="min-h-screen flex flex-col px-6 py-10 bg-gray-50">
       <h2 className="text-3xl font-bold text-center mb-10">Manage Menu</h2>
 
@@ -354,6 +357,7 @@ const AdminMenuPage = () => {
         </Button>
       </div>
     </div>
+    </AdminLayout>
   );
 };
 

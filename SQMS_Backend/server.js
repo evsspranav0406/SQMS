@@ -6,21 +6,30 @@ import http from 'http';
 import { Server } from 'socket.io';
 import authRoutes from './routes/authRoutes.js';
 import menuRoutes from './routes/menuRoutes.js'; // adjust path if needed
-import reservationRoutes from './routes/reservationRoutes.js'; // ← fixed
+import reservationRoutes from './routes/reservationRoutes.js'; // fixed
 import adminAuthRoutes from './routes/adminRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import cron from 'node-cron';
 import Reservation from './models/Reservation.js';
 import User from './models/User.js';
 import nodemailer from 'nodemailer';
-import { autoCancelExpiredReservations } from './controllers/reservationController.js';
+import tableRoutes from './routes/tableRoutes.js';
+import waiterRoutes from './routes/waiterRoutes.js';
+
+import { parse, isBefore, formatISO } from 'date-fns';
 
 dotenv.config();
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:3000", "http://192.168.29.166:3000","http://205.254.168.173:3000","http://172.20.10.3:3000","http://192.168.1.12:3000"],
+    origin: [
+      "http://localhost:3000",
+      "http://192.168.29.166:3000",
+      "http://205.254.168.173:3000",
+      "http://172.20.10.3:3000",
+      "http://192.168.1.12:3000"
+    ],
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -28,8 +37,15 @@ const io = new Server(server, {
 
 // Middleware
 app.use(cors({
-    origin: ["http://localhost:3000", "http://192.168.29.166:3000","http://205.254.168.173:3000","http://172.20.10.3:3000","http://192.168.1.12:3000"],
-    credentials:true
+    origin: [
+      "http://localhost:3000",
+      "http://192.168.29.166:3000",
+      "http://205.254.168.173:3000",
+      "http://172.20.10.3:3000",
+      "http://192.168.1.12:3000",
+      "http://49.43.226.129:3000"
+    ],
+    credentials: true
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -43,6 +59,8 @@ app.use('/api/reservations', reservationRoutes);
 app.use('/api/menu', menuRoutes);
 app.use('/api/admin', adminAuthRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/tables', tableRoutes);
+app.use('/api/waiters', waiterRoutes);
 
 // Socket.io connection
 io.on('connection', (socket) => {
@@ -60,26 +78,19 @@ io.on('connection', (socket) => {
 
 // Function to emit notification to a user
 export const sendNotification = (userId, notification) => {
+  console.log(`Emitting notification to user ${userId}:`, notification);
   io.to(userId).emit('notification', notification);
 };
 
-cron.schedule('*/1 * * * *', async () => {
-  try {
-    // Call the autoCancelExpiredReservations function without req, res
-    await autoCancelExpiredReservationsInternal();
-  } catch (err) {
-    console.error('Error in scheduled job:', err);
-  }
-});
-
-import { parse, isBefore } from 'date-fns';
-
+// Updated auto-cancellation function
 const autoCancelExpiredReservationsInternal = async () => {
   const now = new Date();
-  // Create cutoffTime as local time without timezone offset
+  // Create cutoffTime as local time 30 minutes before now
   const cutoffTime = new Date(now.getTime() - 30 * 60 * 1000);
   cutoffTime.setMilliseconds(0);
   cutoffTime.setSeconds(0);
+  // The following setMinutes and setHours are redundant since cutoffTime is already set based on now,
+  // but are kept for clarity:
   cutoffTime.setMinutes(cutoffTime.getMinutes());
   cutoffTime.setHours(cutoffTime.getHours());
 
@@ -91,18 +102,43 @@ const autoCancelExpiredReservationsInternal = async () => {
   const expiredReservations = [];
 
   for (const reservation of activeReservations) {
-    // Combine date and time strings into a Date object (local time) using date-fns parse
-    const reservationDateTime = parse(`${reservation.date} ${reservation.time}`, 'yyyy-MM-dd HH:mm', new Date());
+    let reservationDateTime;
+    try {
+      console.log(`Raw date string: ${reservation.date}, Raw time string: ${reservation.time} for reservation ID: ${reservation._id}`);
 
-    // Logging for debugging
+      // If reservation.date includes a 'T', it likely includes time (ISO format)
+      // Extract only the date portion (YYYY-MM-DD) and combine with the provided time.
+      const dateOnly = reservation.date.includes('T')
+        ? formatISO(new Date(reservation.date), { representation: 'date' })
+        : reservation.date;
+      // Combine the date-only string with the time string and parse
+      reservationDateTime = parse(`${dateOnly} ${reservation.time}`, 'yyyy-MM-dd HH:mm', new Date());
 
+      if (isNaN(reservationDateTime)) {
+        console.error(`Invalid date/time format for reservation ID: ${reservation._id}, skipping.`);
+        continue; // Skip this reservation if parsing fails.
+      }
+      console.log(`Parsed reservation datetime: ${reservationDateTime} for reservation ID: ${reservation._id}`);
+    } catch (error) {
+      console.error(`Error parsing date/time for reservation ID: ${reservation._id}`, error);
+      continue; // Skip this reservation if there's an error.
+    }
+
+    // Check if the reservationDateTime is before the cutoffTime
     if (isBefore(reservationDateTime, cutoffTime)) {
+      console.log(`Reservation ID: ${reservation._id} is expired and will be cancelled.`);
       expiredReservations.push(reservation);
+    } else {
+      console.log(`Reservation ID: ${reservation._id} is not expired.`);
     }
   }
 
+  // Process expired reservations: update status and send cancellation email.
   for (const reservation of expiredReservations) {
     reservation.status = 'cancelled';
+     if (reservation.status === 'cancelled' && reservation.payment.status === 'paid') {
+      reservation.payment.status = 'refunded';
+    }
     await reservation.save();
 
     // Send cancellation email
@@ -115,24 +151,51 @@ const autoCancelExpiredReservationsInternal = async () => {
           pass: process.env.EMAIL_PASS,
         },
       });
+      const refundMessage = reservation.payment && reservation.payment.status === 'refunded'
+      ? `<p>Your paid amount of ₹${reservation.payment.amount.toFixed(2)} will be refunded shortly.</p>`
+      : '';
+      const cancellationEmailHtml = `
+      <h2>Your Reservation Has Been Cancelled</h2>
+      <p>Dear,${reservation.name},we noticed you did not turn up at the check-in time</p>
+      <p><strong>Name:</strong> ${reservation.name}</p>
+      <p><strong>Date:</strong> ${reservation.date}</p>
+      <p><strong>Time:</strong> ${reservation.time}</p>
+      <p><strong>Guests:</strong> ${reservation.guests}</p>
+      ${refundMessage}
+      <p>Feel free to make another reservation.</p>
+    `;
 
       const mailOptions = {
-        from: process.env.EMAIL_USER,
-        to: user.email,
-        subject: 'Reservation Cancelled - Food Techie',
-        html: "<h2>Your Reservation Has Been Cancelled</h2>" +
-              "<p><strong>Name:</strong> " + reservation.name + "</p>" +
-              "<p><strong>Date:</strong> " + reservation.date + "</p>" +
-              "<p><strong>Time:</strong> " + reservation.time + "</p>" +
-              "<p><strong>Guests:</strong> " + reservation.guests + "</p>" +
-              "<p>If this was a mistake, feel free to make another reservation.</p>"
-      };
+      from: process.env.EMAIL_USER,
+      to: user.email,
+      subject: 'Reservation Cancelled - Food Techie',
+      html: cancellationEmailHtml,
+    };
 
       await transporter.sendMail(mailOptions);
     }
   }
 };
 
+
+
+
+
+
+
+
+
+
+
+
+// Schedule the auto-cancellation job to run every minute.
+cron.schedule('*/1 * * * *', async () => {
+  try {
+    await autoCancelExpiredReservationsInternal();
+  } catch (err) {
+    console.error('Error in scheduled job:', err);
+  }
+});
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

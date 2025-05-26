@@ -35,7 +35,7 @@ const PaymentPage = () => {
       const paymentInfo = {
         status: difference !== undefined ? (difference > 0 ? 'paid' : 'refunded') : 'paid',
         amount: amountToPay,
-        transactionId: uuidv4(),
+        transactionIds: uuidv4(),
       };
 
       let response;
@@ -71,11 +71,13 @@ const PaymentPage = () => {
     }
   };
 
+  const amountToPay = difference !== undefined ? Math.abs(difference) : menuItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4">
       <h1 className="text-3xl font-bold mb-6">Payment</h1>
       <p className="mb-4">Please confirm your payment to complete the reservation.</p>
-      <p className="mb-2">Amount to pay: ₹{menuItems.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)}</p>
+      <p className="mb-2">Amount to pay: ₹{amountToPay.toFixed(2)}</p>
       <button
         onClick={handlePayment}
         disabled={isPaying}

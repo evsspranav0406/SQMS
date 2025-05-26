@@ -10,7 +10,9 @@ const reservationSchema = new mongoose.Schema({
   email: { type: String, required: true },
   specialRequests: { type: String },
   qrCode: { type: String },
-  status: { type: String, enum: ['active', 'completed', 'cancelled'], default: 'active' },
+  status: { type: String, enum: ['active', 'completed', 'cancelled','checked-in'], default: 'active' },
+  table: { type: mongoose.Schema.Types.ObjectId, ref: 'Table' },
+  waiter: { type: mongoose.Schema.Types.ObjectId, ref: 'Waiter' },
   menu: [
     {
       itemId: { type: mongoose.Schema.Types.ObjectId, ref: 'MenuItem' },
@@ -22,7 +24,7 @@ const reservationSchema = new mongoose.Schema({
   payment: {
     status: { type: String, default: 'pending' },
     amount: { type: Number, default: 0 },
-    transactionId: { type: String, default: '' }
+    transactionIds: { type: [String], default: [] }
   }
 }, { timestamps: true });
 
