@@ -131,6 +131,32 @@ const Navbar = () => {
     setShowNotifications(!showNotifications);
   };
 
+  const handleClearNotification = async (id: string) => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    try {
+      await axios.delete(`http://localhost:5000/api/notifications/${id.trim()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setNotifications((prev) => prev.filter((n) => n._id !== id));
+    } catch (error) {
+      console.error('Failed to clear notification', error);
+    }
+  };
+
+  const handleClearAllNotifications = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    try {
+      await axios.delete('http://localhost:5000/api/notifications', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setNotifications([]);
+    } catch (error) {
+      console.error('Failed to clear all notifications', error);
+    }
+  };
+
   return (
     <nav className="bg-white/90 backdrop-blur-sm fixed w-full z-50 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -169,12 +195,31 @@ const Navbar = () => {
                       {notifications.length === 0 ? (
                         <div className="p-4 text-sm text-gray-500">No notifications</div>
                       ) : (
-                        notifications.map((notification) => (
-                          <div key={notification._id} className="p-3 border-b border-gray-200">
-                            <p className="text-sm">{notification.message}</p>
-                            <p className="text-xs text-gray-400">{new Date(notification.createdAt).toLocaleString()}</p>
+                        <>
+                          {notifications.map((notification) => (
+                            <div key={notification._id} className="p-3 border-b border-gray-200 flex justify-between items-start">
+                              <div>
+                                <p className="text-sm">{notification.message}</p>
+                                <p className="text-xs text-gray-400">{new Date(notification.createdAt).toLocaleString()}</p>
+                              </div>
+                              <button
+                                onClick={() => handleClearNotification(notification._id)}
+                                aria-label="Clear notification"
+                                className="text-gray-400 hover:text-red-600 ml-2"
+                              >
+                                &#x2715;
+                              </button>
+                            </div>
+                          ))}
+                          <div className="p-3 border-t border-gray-200 text-center">
+                            <button
+                              onClick={handleClearAllNotifications}
+                              className="text-sm text-red-600 hover:underline"
+                            >
+                              Clear All
+                            </button>
                           </div>
-                        ))
+                        </>
                       )}
                     </div>
                   )}

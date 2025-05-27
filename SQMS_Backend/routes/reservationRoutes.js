@@ -1,5 +1,5 @@
 import express from 'express';
-import { createReservation, updateReservation, getMyReservation, cancelReservation, getReservationById, checkInReservation,completeReservation, getReservationByQuery } from '../controllers/reservationController.js';
+import { createReservation, updateReservation, getMyReservation, cancelReservation, getReservationById, checkInReservation,completeReservation, getReservationByQuery, saveFeedback } from '../controllers/reservationController.js';
 import { protect } from '../middleware/auth.js';
 import { isAdmin } from '../middleware/isAdmin.js';
 
@@ -27,6 +27,10 @@ router.delete('/:id/cancel', protect, cancelReservation);
 router.get('/:id', isAdmin, getReservationById);
 
 router.post('/:id/checkout',protect,completeReservation );
+
+// POST /api/reservations/:id/feedback → Save feedback for reservation
+router.post('/:id/feedback', protect, saveFeedback);
+
 
 
 export default router;

@@ -9,7 +9,7 @@ import { sendEmail } from '../utils/sendEmail.js';
 import Notification from '../models/Notification.js';
 import { sendNotification } from '../server.js';
 import mongoose from 'mongoose';
-import { ObjectId } from 'mongodb';
+// Removed import { ObjectId } from 'mongodb';
 import { v4 as uuidv4 } from 'uuid';
 import { parse, formatISO, parseISO, format } from 'date-fns';
 import { parseAndFormatDate } from '../utils/dateUtils.js';
@@ -33,7 +33,6 @@ const generateQRCode = async (reservation) => {
   const qrString = JSON.stringify(qrData);
   return await QRCode.toDataURL(qrString);
 };
-
 
 const sendReservationEmail = async (user, reservation, qrCode, subject = 'Reservation Confirmation') => {
   const menuHtml = reservation.menu?.length
@@ -60,7 +59,9 @@ const sendReservationEmail = async (user, reservation, qrCode, subject = 'Reserv
     : 'None';
 
   const totalPrice = reservation.menu?.reduce((sum, item) => sum + (item.price * item.quantity), 0) || 0;
-
+  const refundMessage = reservation.payment && reservation.payment.refund
+      ? `<p>Your paid amount of ₹${reservation.payment.refund.toFixed(2)} will be refunded shortly.</p>`
+      : '';
   let formattedDate = reservation.date;
   try {
     const parsedDate = parseISO(reservation.date);
@@ -78,6 +79,7 @@ const sendReservationEmail = async (user, reservation, qrCode, subject = 'Reserv
     ${menuHtml}
     ${reservation.menu?.length ? `<p><strong>Total Price:</strong> ₹${totalPrice.toFixed(2)}</p>` : ''}
     ${totalPrice > 0 ? `<p><strong>Paid:</strong> ${reservation.payment?.status === 'paid' ? 'Yes' : 'No'}</p>` : ''}
+    ${refundMessage}
   `;
   const attachments = [
     {
@@ -182,12 +184,10 @@ export const createReservation = async (req, res) => {
 
     const notificationMessage = `Your reservation for ${formattedDate} at ${time} has been confirmed.`;
     const notification = new Notification({
-      userId: mongoose.Types.ObjectId(userId),
+      userId: typeof userId === 'string' ? mongoose.Types.ObjectId(userId) : userId,
       message: notificationMessage,
     });
-    console.log('Saving notification:', notification);
     await notification.save();
-    console.log('Notification saved:', notification);
 
     sendNotification(userId.toString(), notification.toObject());
 
@@ -247,7 +247,6 @@ export const updateReservation = async (req, res) => {
     }
 
     const reservation = await Reservation.findOne({ _id: id, userId });
-    console.log(reservation)
     if (!reservation) return res.status(404).json({ message: 'Reservation not found' });
 
     const reservationDateTime = parse(`${formattedDate} ${time}`, 'yyyy-MM-dd HH:mm', new Date());
@@ -260,18 +259,14 @@ export const updateReservation = async (req, res) => {
     let selectedMenu = [];
     if (menu?.length) {
       const filteredMenu = menu.filter(item => item.quantity > 0);
-      const menuItems = await MenuItem.find({ _id: { $in: filteredMenu.map(item => new ObjectId(item._id)) } });
+      const menuItems = await MenuItem.find({ _id: { $in: filteredMenu.map(item => new mongoose.Types.ObjectId(item._id)) } });
       const filteredMenuMap = new Map(filteredMenu.map(m => [m._id, m]));
       /*selectedMenu = menuItems.map(item => {
         const menuItem = filteredMenuMap.get(item._id.toString());
         return { itemId: item._id, name: item.name, price: item.price, quantity: menuItem?.quantity || 1 }; 
       });*/
       selectedMenu=menu
-      console.log(filteredMenu)
-      console.log(menuItems)
     } 
-    console.log(menu)
-    console.log(selectedMenu)
 
     const oldTotal = reservation.menu?.reduce((sum, item) => sum + item.price * item.quantity, 0) || 0;
     const newTotal = selectedMenu.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -294,25 +289,31 @@ export const updateReservation = async (req, res) => {
     if (difference > 0) {
       const totalPaidSoFar = reservation.payment?.amount || 0;
       const existingTransactionIds = reservation.payment?.transactionIds || [];
+      const existingrefund=reservation.payment?.refund ||0;
       reservation.payment = {
         status: 'paid',
         amount: totalPaidSoFar + difference,
         transactionIds: [...existingTransactionIds, uuidv4()],
+        refund: existingrefund,
       };
     } else if (difference < 0) {
       // If menu is emptied (length 0), set payment status to refunded with same amount and transactionIds
       if (menu.length === 0) {
+        const existingrefund=reservation.payment?.refund ||0;
         reservation.payment = {
           status: 'refunded',
-          amount: reservation.payment.amount,
+          amount: ''||0,
           transactionIds: reservation.payment.transactionIds,
+          refund: reservation.payment.amount+existingrefund,
         };
       } else {
         const existingTransactionIds = reservation.payment?.transactionIds || [];
+        const existingrefund=reservation.payment?.refund ||0;
         reservation.payment = {
-          status: 'refund_pending...',
-          amount: Math.abs(difference),
-          transactionIds: [...existingTransactionIds, uuidv4()],
+          status: 'paid',
+          amount: reservation.payment.amount+difference,
+          refund: Math.abs(difference)+existingrefund,
+          transactionIds: [...existingTransactionIds],
         };
       }
     } else {
@@ -326,6 +327,15 @@ export const updateReservation = async (req, res) => {
     reservation.qrCode = await generateQRCode(reservation);
 
     await reservation.save();
+
+    const notificationMessage = `Your reservation is upated to ${formattedDate} at ${time}.`;
+    const notification = new Notification({
+      userId: typeof userId === 'string' ? mongoose.Types.ObjectId(userId) : userId,
+      message: notificationMessage,
+    });
+    await notification.save();
+
+    sendNotification(userId.toString(), notification.toObject());
 
     await sendReservationEmail(user, reservation, reservation.qrCode, 'Reservation Updated');
 
@@ -369,7 +379,7 @@ const sendCancellationEmail = async (user, reservation) => {
     html: `
       <h2>Your Reservation Has Been Cancelled</h2>
       <p><strong>Name:</strong> ${reservation.name}</p>
-      <p><strong>Date:</strong> ${formattedDate}</p>
+      <p><strong>Date:</strong> ${reservation.date}</p>
       <p><strong>Time:</strong> ${reservation.time}</p>
       <p><strong>Guests:</strong> ${reservation.guests}</p>
       <p>If this was a mistake, feel free to make another reservation.</p>
@@ -407,13 +417,23 @@ export const cancelReservation = async (req, res) => {
       const waiter = await Waiter.findById(reservation.waiter);
       if (waiter) {
         waiter.currentTableCount = Math.max((waiter.currentTableCount || 1) - 1, 0);
+        if (waiter.currentReservationId && waiter.currentReservationId.toString() === reservation._id.toString()) {
+          waiter.currentReservationId = null;
+        }
         if (waiter.currentTableCount < 5) {
           waiter.status = 'available';
         }
         await waiter.save();
       }
     }
+    const notificationMessage = `Your Reservation Has Been Cancelled.Please fell free to make another reservation if it was a mistake.`; 
+    const notification = new Notification({
+      userId: typeof reservation.userId === 'string' ? mongoose.Types.ObjectId(reservation.userId) : reservation.userId,
+      message: notificationMessage,
+    });
+    await notification.save();
 
+    sendNotification(reservation.userId.toString(), notification.toObject());
     const user = await User.findById(userId);
 
     const refundMessage = reservation.payment && reservation.payment.status === 'refunded'
@@ -467,7 +487,6 @@ const sendCheckoutEmail = async (user) => {
     <p>The Food Techie Team</p>
 
     `;
-
   await sendEmail(user.email, subject, htmlContent);
 };
 // Mark reservation as completed
@@ -486,34 +505,45 @@ export const completeReservation = async (req, res) => {
       const waiter = await Waiter.findById(reservation.waiter);
       if (waiter) {
         waiter.currentTableCount = Math.max((waiter.currentTableCount || 1) - 1, 0);
+        if (waiter.currentReservationId && waiter.currentReservationId.toString() === reservation._id.toString()) {
+          waiter.currentReservationId = null;
+        }
         if (waiter.currentTableCount < 5) {
           waiter.status = 'available';
+        } else {
+          waiter.status = 'occupied';
         }
         await waiter.save();
       }
     }
 
     if (reservation.table) {
-        const table = await Table.findById(reservation.table);
-        if (table) {
-          table.status = 'available';
-          }
-          await table.save();
-        }
+      const table = await Table.findById(reservation.table);
+      if (table) {
+        table.status = 'available';
+        await table.save();
+      }
+    }
+
+    const notificationMessage = `Thank you for Choosing Our Restaurant.Hope you had a great dining experience.`;
+    const notification = new Notification({
+      userId: typeof reservation.userId === 'string' ? mongoose.Types.ObjectId(reservation.userId) : reservation.userId,
+      message: notificationMessage,
+    });
+    await notification.save();
+
+    sendNotification(reservation.userId.toString(), notification.toObject());
 
     const user = await User.findById(reservation.userId);
     if (user) {
       await sendCheckoutEmail(user);
     }
-
     res.json({ message: 'Reservation marked as completed', reservation });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Error marking reservation as completed' });
   }
 };
-
-
 
 export const getReservationById = async (req, res) => {
   try {
@@ -575,41 +605,95 @@ export const getReservationByQuery = async (req, res) => {
       return res.status(400).json({ message: 'Query parameter is required' });
     }
 
-    let reservation = null;
-
-    // Check if query is a valid MongoDB ObjectId
+    // If query is a valid MongoDB ObjectId, try to find by ID
     if (mongoose.Types.ObjectId.isValid(query)) {
-      reservation = await Reservation.findById(query);
+      const reservation = await Reservation.findById(query);
+      if (reservation) {
+        let formattedReservation = reservation.toObject();
+        if (formattedReservation.date) {
+          try {
+            const parsedDate = parseISO(formattedReservation.date);
+            formattedReservation.date = format(parsedDate, 'yyyy-MM-dd');
+          } catch {
+            // leave as is
+          }
+        }
+        return res.json({ reservations: [formattedReservation] });
+      }
     }
 
-    // If not found by ID, try to find by phone or email
-    if (!reservation) {
-      reservation = await Reservation.findOne({
-        $or: [
-          { phone: query },
-          { email: query }
-        ]
-      });
+    // Find all reservations by phone or email
+    const reservations = await Reservation.find({
+      $or: [
+        { phone: query },
+        { email: query }
+      ]
+    });
+
+    if (!reservations || reservations.length === 0) {
+      return res.status(404).json({ message: 'Reservation not found' });
     }
 
+    // Format dates for all reservations
+    const formattedReservations = reservations.map(reservation => {
+      let formattedReservation = reservation.toObject();
+      if (formattedReservation.date) {
+        try {
+          const parsedDate = parseISO(formattedReservation.date);
+          formattedReservation.date = format(parsedDate, 'yyyy-MM-dd');
+        } catch {
+          // leave as is
+        }
+      }
+      return formattedReservation;
+    });
+
+    res.json({ reservations: formattedReservations });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error fetching reservation' });
+  }
+};
+
+// New controller to save feedback for a reservation
+export const saveFeedback = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rating, comments, serviceQuality, foodQuality, ambiance } = req.body;
+
+    if (!rating || rating < 1 || rating > 5) {
+      return res.status(400).json({ message: 'Rating must be between 1 and 5' });
+    }
+    if (!serviceQuality || serviceQuality < 1 || serviceQuality > 5) {
+      return res.status(400).json({ message: 'Service Quality rating must be between 1 and 5' });
+    }
+    if (!foodQuality || foodQuality < 1 || foodQuality > 5) {
+      return res.status(400).json({ message: 'Food Quality rating must be between 1 and 5' });
+    }
+    if (!ambiance || ambiance < 1 || ambiance > 5) {
+      return res.status(400).json({ message: 'Ambiance rating must be between 1 and 5' });
+    }
+
+    const reservation = await Reservation.findById(id);
     if (!reservation) {
       return res.status(404).json({ message: 'Reservation not found' });
     }
 
-    let formattedReservation = reservation.toObject();
-    if (formattedReservation.date) {
-      try {
-        const parsedDate = parseISO(formattedReservation.date);
-        formattedReservation.date = format(parsedDate, 'yyyy-MM-dd');
-      } catch {
-        // leave as is
-      }
-    }
+    reservation.feedback = {
+      rating,
+      comments,
+      serviceQuality,
+      foodQuality,
+      ambiance,
+      date: new Date(),
+    };
 
-    res.json({ reservation: formattedReservation });
+    await reservation.save();
+
+    res.json({ message: 'Feedback saved successfully', feedback: reservation.feedback });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Error fetching reservation' });
+    res.status(500).json({ message: 'Error saving feedback' });
   }
 };
 
@@ -713,12 +797,22 @@ export const checkInReservation = async (req, res) => {
 
     // Update waiter currentTableCount and status
     availableWaiter.currentTableCount = (availableWaiter.currentTableCount || 0) + 1;
+    availableWaiter.currentReservationId = reservation._id;
     if (availableWaiter.currentTableCount >= 5) {
       availableWaiter.status = 'occupied';
     } else {
       availableWaiter.status = 'available';
     }
     await availableWaiter.save();
+
+    const notificationMessage = `Your reservation for ${reservation.date} at ${reservation.time} has been checked in.Your table number is ${suitableTable.tableNumber} and your waiter is ${availableWaiter.name}.`;
+    const notification = new Notification({
+      userId: typeof reservation.userId === 'string' ? mongoose.Types.ObjectId(reservation.userId) : reservation.userId,
+      message: notificationMessage,
+    });
+    await notification.save();
+
+    sendNotification(reservation.userId.toString(), notification.toObject());
 
     // Populate table and waiter before sending response
     const populatedReservation = await Reservation.findById(reservation._id)

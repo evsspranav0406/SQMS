@@ -46,11 +46,14 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
           <Link to="/admin/reservations" className="hover:text-primary">
             📅 Reservations
           </Link>
-          <Link to="/admin/menu/add" className="hover:text-primary">
-            ➕ Add Menu Item
-          </Link>
           <Link to="/admin/checkin" className="hover:text-primary">
             📷 Scan QR
+          </Link>
+          <Link to="/admin/tables" className="hover:text-primary">
+            🪑 Tables
+          </Link>
+          <Link to="/admin/waiters" className="hover:text-primary">
+            👨‍🍳 Waiters
           </Link>
         </nav>
       </aside>

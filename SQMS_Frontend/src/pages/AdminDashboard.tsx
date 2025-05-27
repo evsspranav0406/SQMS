@@ -83,6 +83,7 @@ const AdminDashboard = () => {
               <p>Checked-in: {dashboardStatus.reservations.checkedIn}</p>
               <p>Upcoming: {dashboardStatus.reservations.upcoming}</p>
               <p>Completed: {dashboardStatus.reservations.completed}</p>
+              <p>Cancelled: {dashboardStatus.reservations.cancelled}</p>
             </div>
           </div>
         )}
@@ -110,56 +111,7 @@ const AdminDashboard = () => {
       <br></br>
       {/* Other dashboard cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h3 className="text-xl font-semibold mb-2">📦 Menu Items</h3>
-          <p className="text-gray-600">Add, edit, or remove items on your restaurant’s menu.</p>
-          <a href="/admin/menu" className="mt-4 inline-block bg-primary text-white px-4 py-2 rounded">Go to Menu</a>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h3 className="text-xl font-semibold mb-2">📋 Reservations</h3>
-          <p className="text-gray-600">View and manage all current reservations.</p>
-          <a href="/admin/reservations" className="mt-4 inline-block bg-primary text-white px-4 py-2 rounded">View Reservations</a>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h3 className="text-xl font-semibold mb-2">➕ Add Item</h3>
-          <p className="text-gray-600">Quickly add a new item to the menu.</p>
-          <a href="/admin/menu/add" className="mt-4 inline-block bg-primary text-white px-4 py-2 rounded">Add Menu Item</a>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h3 className="text-xl font-semibold mb-2">📷 Scan QR</h3>
-          <p className="text-gray-600">Scan QR for checkin</p>
-          <button
-            onClick={() => navigate('/admin/checkin')}
-            className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark transition"
-          >
-            Scan QR for Check-in
-          </button>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h3 className="text-xl font-semibold mb-2">🪑 Tables</h3>
-          <p className="text-gray-600">View and manage restaurant tables.</p>
-          <button
-            onClick={() => navigate('/admin/tables')}
-            className="mt-4 inline-block bg-primary text-white px-4 py-2 rounded"
-          >
-            Go to Tables
-          </button>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h3 className="text-xl font-semibold mb-2">👨‍🍳 Waiters</h3>
-          <p className="text-gray-600">View and manage waiters.</p>
-          <button
-            onClick={() => navigate('/admin/waiters')}
-            className="mt-4 inline-block bg-primary text-white px-4 py-2 rounded"
-          >
-            Go to Waiters
-          </button>
-        </div>
+        
       </div>
     </AdminLayout>
   );

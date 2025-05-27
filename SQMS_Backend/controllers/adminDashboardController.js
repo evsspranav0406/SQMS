@@ -1,6 +1,8 @@
+
 import Table from '../models/Table.js';
 import Waiter from '../models/Waiter.js';
 import Reservation from '../models/Reservation.js';
+import { toISTDateString } from '../utils/dateUtils.js';
 
 export const getDashboardStatus = async (req, res) => {
   try {
@@ -20,8 +22,8 @@ export const getDashboardStatus = async (req, res) => {
     }, {});
     const totalWaiters = waiters.length;
 
-    // Get today's date string in YYYY-MM-DD format
-    const todayStr = new Date().toISOString().substring(0, 10);
+    // Get today's date string in IST YYYY-MM-DD format
+    const todayStr = toISTDateString(new Date());
 
     // Aggregate reservations counts for today only
     const reservations = await Reservation.find({ date: todayStr });
@@ -29,9 +31,9 @@ export const getDashboardStatus = async (req, res) => {
     const checkedInCount = reservations.filter(r => r.status === 'checked-in').length;
     // Upcoming reservations with status 'pending' or 'active'
     const upcomingCount = reservations.filter(r => r.status === 'pending' || r.status === 'active').length;
-    const totalReservations = reservations.filter(r => r.status !== 'cancelled').length;
+    const totalReservations = reservations.filter(r => r.status==='active' ||r.status ==='checked-in' || r.status === 'cancelled'|| r.status==='completed').length;
     const completedReservations = reservations.filter(r => r.status === 'completed').length;
-
+    const cancelledReservations = reservations.filter(r => r.status === 'cancelled').length;
     // Find reservations for today (excluding cancelled)
     const todaysReservations = await Reservation.find({ date: todayStr, status: { $ne: 'cancelled' } });
 
@@ -49,6 +51,7 @@ export const getDashboardStatus = async (req, res) => {
         checkedIn: checkedInCount,
         upcoming: upcomingCount,
         completed: completedReservations,
+        cancelled: cancelledReservations,
         todaysReservations: todaysReservations,
       },
     });
@@ -65,9 +68,8 @@ export const getReservationAnalytics = async (req, res) => {
     const pastDate = new Date();
     pastDate.setDate(today.getDate() - 29); // last 30 days including today
 
-    const todayStr = today.toISOString().substring(0, 10);
-    const pastDateStr = pastDate.toISOString().substring(0, 10);
-
+    const todayStr = toISTDateString(today);
+    const pastDateStr = toISTDateString(pastDate);
     const analytics = await Reservation.aggregate([
       {
         $match: {
@@ -106,7 +108,7 @@ export const getReservationAnalytics = async (req, res) => {
     for (let i = 0; i < 30; i++) {
       const date = new Date(pastDate);
       date.setDate(pastDate.getDate() + i);
-      const dateStr = date.toISOString().substring(0, 10);
+      const dateStr = toISTDateString(date);
       result.push({
         date: dateStr,
         total: dateStatusCounts[dateStr]?.total || 0,
@@ -128,10 +130,9 @@ export const getFinancialAnalytics = async (req, res) => {
     const today = new Date();
     const pastDate = new Date();
     pastDate.setDate(today.getDate() - 29); // last 30 days including today
-
-    const todayStr = today.toISOString().substring(0, 10);
-    const pastDateStr = pastDate.toISOString().substring(0, 10);
-
+  
+    const todayStr = toISTDateString(today)
+    const pastDateStr = toISTDateString(pastDate)
     const analytics = await Reservation.aggregate([
       {
         $match: {
@@ -160,13 +161,12 @@ export const getFinancialAnalytics = async (req, res) => {
     for (let i = 0; i < 30; i++) {
       const date = new Date(pastDate);
       date.setDate(pastDate.getDate() + i);
-      const dateStr = date.toISOString().substring(0, 10);
+      const dateStr = toISTDateString(date)
       result.push({
         date: dateStr,
         totalAmount: dateAmounts[dateStr] || 0,
       });
     }
-
     res.json(result);
   } catch (error) {
     console.error('Error fetching financial analytics:', error);

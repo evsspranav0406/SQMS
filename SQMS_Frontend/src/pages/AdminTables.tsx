@@ -207,6 +207,7 @@ const AdminTables = () => {
                     <th className="py-3 px-6">Table Number</th>
                     <th className="py-3 px-6">Capacity</th>
                     <th className="py-3 px-6">Status</th>
+                    <th className="py-3 px-6">Waiter Name</th>
                     <th className="py-3 px-6">Actions</th>
                   </tr>
                 </thead>
@@ -268,27 +269,28 @@ const AdminTables = () => {
                             </>
                           ) : (
                             <>
-                              <td className="py-2 px-6">{table.tableNumber}</td>
-                              <td className="py-2 px-6">{table.capacity}</td>
-                              <td className="py-2 px-6">{table.status}</td>
-                              <td className="py-2 px-6 flex gap-2">
-                              <Button
-                                variant="outline"
-                                className="text-blue-500"
-                                onClick={() => handleEditClick(table)}
-                                aria-label="Edit"
-                              >
-                                <Edit size={18} />
-                              </Button>
-                              <Button
-                                variant="outline"
-                                className="text-red-500"
-                                onClick={() => handleDeleteClick(table._id as string)}
-                                aria-label="Delete"
-                              >
-                                <Trash size={18} />
-                              </Button>
-                              </td>
+                          <td className="py-2 px-6">{table.tableNumber}</td>
+                          <td className="py-2 px-6">{table.capacity}</td>
+                          <td className="py-2 px-6">{table.status}</td>
+                          <td className="py-2 px-6">{table.waiterName || 'N/A'}</td>
+                          <td className="py-2 px-6 flex gap-2">
+                          <Button
+                            variant="outline"
+                            className="text-blue-500"
+                            onClick={() => handleEditClick(table)}
+                            aria-label="Edit"
+                          >
+                            <Edit size={18} />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            className="text-red-500"
+                            onClick={() => handleDeleteClick(table._id as string)}
+                            aria-label="Delete"
+                          >
+                            <Trash size={18} />
+                          </Button>
+                          </td>
                             </>
                           )}
                         </tr>

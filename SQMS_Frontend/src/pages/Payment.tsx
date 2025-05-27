@@ -11,18 +11,15 @@ const PaymentPage = () => {
   // Expect reservation details and menu items passed via location state
   const { reservationData, menuItems, difference } = location.state || {};
 
-  const [isPaying, setIsPaying] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   if (!reservationData) {
     return <div>No reservation data found. Please start your reservation again.</div>;
   }
 
   const handlePayment = async () => {
-    setIsPaying(true);
+    setIsProcessing(true);
     try {
-      // Simulate payment process here or integrate real payment gateway
-      // For now, assume payment is successful and create or update reservation with payment info
-
       const token = localStorage.getItem('token');
       if (!token) {
         toast.error('You must be logged in to make a reservation.');
@@ -35,6 +32,7 @@ const PaymentPage = () => {
       const paymentInfo = {
         status: difference !== undefined ? (difference > 0 ? 'paid' : 'refunded') : 'paid',
         amount: amountToPay,
+        refund: difference !== undefined && difference < 0 ? amountToPay : 0,
         transactionIds: uuidv4(),
       };
 
@@ -67,11 +65,33 @@ const PaymentPage = () => {
     } catch (error) {
       toast.error('Payment failed or reservation could not be created.');
     } finally {
-      setIsPaying(false);
+      setIsProcessing(false);
     }
   };
 
+  const handleRefundConfirm = async () => {
+    await handlePayment();
+  };
+
   const amountToPay = difference !== undefined ? Math.abs(difference) : menuItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+  if (difference !== undefined && difference < 0) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-4">
+        <h1 className="text-3xl font-bold mb-6">Refund</h1>
+        <p className="mb-4">Your reservation total has decreased.</p>
+        <p className="mb-4">Amount to be refunded: ₹{amountToPay.toFixed(2)}</p>
+        <p className="mb-4">Please confirm to process the refund. Thank you for your patience.</p>
+        <button
+          onClick={handleRefundConfirm}
+          disabled={isProcessing}
+          className="px-6 py-3 bg-primary text-white rounded hover:bg-primary-dark transition"
+        >
+          {isProcessing ? 'Processing Refund...' : 'Confirm Refund'}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4">
@@ -80,10 +100,10 @@ const PaymentPage = () => {
       <p className="mb-2">Amount to pay: ₹{amountToPay.toFixed(2)}</p>
       <button
         onClick={handlePayment}
-        disabled={isPaying}
+        disabled={isProcessing}
         className="px-6 py-3 bg-primary text-white rounded hover:bg-primary-dark transition"
       >
-        {isPaying ? 'Processing Payment...' : 'Pay Now'}
+        {isProcessing ? 'Processing Payment...' : 'Pay Now'}
       </button>
     </div>
   );

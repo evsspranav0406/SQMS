@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom';
 const AdminCheckin = () => {
   const [scanning, setScanning] = useState(false);
   const [reservationData, setReservationData] = useState(null);
+  const [reservationsList, setReservationsList] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -140,7 +141,6 @@ const AdminCheckin = () => {
     }
     setLoading(true);
     const token = localStorage.getItem('adminToken');
-    console.log(token)
     if (!token || !isTokenValid(token)) {
       toast.error('Admin token missing or expired. Please login again.');
       navigate('/admin/login');
@@ -153,37 +153,27 @@ const AdminCheckin = () => {
           Authorization: `Bearer ${token}`,
         },
       });
-      if(response.data.reservation.status ==='active')
-          {
-          setReservationData(response.data.reservation);
-          }
-          if(response.data.reservation.status === 'cancelled')
-          {
-            toast.error(`No reservation found `);
-            setLoading(false)
-          }
-          if(response.data.reservation.status === 'completed')
-          {
-            toast.error(`No reservation found`);
-            setLoading(false)
-          }
-          if(response.data.reservation.status === 'checked-in')
-          {
-            toast.error(`Reservation with ${searchQuery} is already checked-in `);
-            setLoading(false)
-          }
-          else{
-            setLoading(false)
-          }
-      console.log(response.data.reservation)
-      console.log(searchQuery)
+      const reservations = response.data.reservations || [];
+      if (reservations.length === 0) {
+        toast.error('Reservation not found');
+        setLoading(false);
+        return;
+      }
+      // Filter active reservations
+      const activeReservation = reservations.find(r => r.status === 'active');
+      if (activeReservation) {
+        setReservationData(activeReservation);
+        setReservationsList(reservations);
+      } else {
+        toast.error('No active reservation found');
+        setReservationData(null);
+        setReservationsList(reservations);
+      }
       setLoading(false);
     } catch (error) {
       console.error('Search error:', error);
       if (error.response?.status === 401) {
-        console.log(token)
         toast.error('Unauthorized. Please login again.');
-        //navigate('/admin/login');
       } else if (error.response?.status === 404) {
         toast.error('Reservation not found');
       } else {
@@ -230,20 +220,20 @@ const AdminCheckin = () => {
         ) : (
           <div className="max-w-md mx-auto bg-white p-6 rounded shadow">
             <h3 className="text-xl font-semibold mb-4">Reservation Details</h3>
-            <p><strong>Name:</strong> {reservationData.name}</p>
-            <p><strong>Guests:</strong> {reservationData.guests}</p>
-            <p><strong>Date:</strong> {reservationData.date}</p>
-            <p><strong>Time:</strong> {reservationData.time}</p>
-            {reservationData.menu && reservationData.menu.length > 0 && (
-              <>
-                <p className="mt-4 font-semibold">Menu:</p>
-                <ul className="list-disc list-inside">
-                  {reservationData.menu.map((item, index) => (
-                    <li key={index}>{item.name} x {item.quantity}</li>
-                  ))}
-                </ul>
-              </>
-            )}
+              <p><strong>Name:</strong> {reservationData.name}</p>
+              <p><strong>Guests:</strong> {reservationData.guests}</p>
+              <p><strong>Date:</strong> {reservationData.date}</p>
+              <p><strong>Time:</strong> {reservationData.time}</p>
+              {reservationData.menu && reservationData.menu.length > 0 && (
+                <>
+                  <p className="mt-4 font-semibold">Menu:</p>
+                  <ul className="list-disc list-inside">
+                    {reservationData.menu.map((item, index) => (
+                      <li key={index}>{item.name} x {item.quantity}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
             <div className="mt-6 flex justify-between">
               <button
                 onClick={handleCancel}

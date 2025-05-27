@@ -16,11 +16,38 @@ export const createTable = async (req, res) => {
   }
 };
 
-// Get all tables
+// Get all tables with assigned waiter names
+import Reservation from '../models/Reservation.js';
+import Waiter from '../models/Waiter.js';
+
 export const getAllTables = async (req, res) => {
   try {
     const tables = await Table.find();
-    res.status(200).json(tables);
+
+    // Find all active or checked-in reservations
+    const activeReservations = await Reservation.find({
+      status: { $in: ['active', 'checked-in'] },
+      table: { $ne: null }
+    }).populate('waiter');
+
+    // Map tableId to waiter name
+    const tableWaiterMap = {};
+    activeReservations.forEach(reservation => {
+      const tableId = reservation.table.toString();
+      if (reservation.waiter && reservation.waiter.name) {
+        tableWaiterMap[tableId] = reservation.waiter.name;
+      }
+    });
+
+    // Add waiterName to each table
+    const tablesWithWaiter = tables.map(table => {
+      return {
+        ...table.toObject(),
+        waiterName: tableWaiterMap[table._id.toString()] || 'N/A',
+      };
+    });
+
+    res.status(200).json(tablesWithWaiter);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

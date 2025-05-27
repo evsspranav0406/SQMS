@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import AdminLayout from '../components/AdminLayout';
 import { toast } from 'sonner';
+import { toISTDateString } from '@/lib/utils';
 
 const AdminReservations = () => {
   const [reservations, setReservations] = useState([]);
@@ -10,7 +11,7 @@ const AdminReservations = () => {
   const [selectedDate, setSelectedDate] = useState(() => {
     // Initialize to today's date in yyyy-mm-dd format
     const today = new Date();
-    return today.toISOString().substring(0, 10);
+    return toISTDateString(today);
   });
   const itemsPerPage = 20;
 

@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom';
 import { Edit, Trash } from 'lucide-react';
 
 interface Waiter {
+  currentReservationId: any;
   _id: string;
   name: string;
   status: string;
@@ -48,6 +49,7 @@ const AdminWaiters = () => {
             Authorization: `Bearer ${token}`,
           },
         });
+        console.log('Fetched waiters:', response.data);
         setWaiters(response.data);
       } catch (err) {
         setError('Failed to fetch waiters');
@@ -215,97 +217,108 @@ const AdminWaiters = () => {
                     <th className="py-3 px-6">Name</th>
                     <th className="py-3 px-6">Status</th>
                     <th className="py-3 px-6">Current Allocated Tables</th>
-                    <th className="py-3 px-6">Actions</th>
+                    <th className="py-3 px-6">Current Table Number</th>
+                <th className="py-3 px-6">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+                {paginatedWaiters.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="text-center py-4">
+                      No waiters found.
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                    {paginatedWaiters.length === 0 ? (
-                      <tr>
-                        <td colSpan={4} className="text-center py-4">
-                          No waiters found.
-                        </td>
-                      </tr>
-                    ) : (
-                      paginatedWaiters.map((waiter) => (
-                        <tr key={waiter._id} className="border-t hover:bg-gray-50">
-                          {editingWaiterId === waiter._id ? (
-                            <>
-                              <td className="py-2 px-6">
-                                <input
-                                  type="text"
-                                  name="name"
-                                  value={editFormData.name}
-                                  onChange={handleInputChange}
-                                  className="border rounded px-2 py-1 w-full"
-                                />
-                              </td>
-                              <td className="py-2 px-6">
-                                <select
-                                  name="status"
-                                  value={editFormData.status}
-                                  onChange={handleInputChange}
-                                  className="border rounded px-2 py-1 w-full"
-                                >
-                                  <option value="available">available</option>
-                                  <option value="occupied">occupied</option>
-                                </select>
-                              </td>
-                              <td className="py-2 px-6">
-                                <input
-                                  type="number"
-                                  name="currentTableCount"
-                                  value={editFormData.currentTableCount}
-                                  onChange={handleInputChange}
-                                  className="border rounded px-2 py-1 w-full"
-                                  min={0}
-                                />
-                              </td>
-                              <td className="py-2 px-6 flex gap-2">
-                                <button
-                                  onClick={() => handleSaveClick(waiter._id)}
-                                  disabled={actionLoading}
-                                  className="bg-green-500 text-white px-3 py-1 rounded"
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  onClick={handleCancelClick}
-                                  disabled={actionLoading}
-                                  className="bg-gray-400 text-white px-3 py-1 rounded"
-                                >
-                                  Cancel
-                                </button>
-                              </td>
-                            </>
-                          ) : (
-                            <>
-                              <td className="py-2 px-6">{waiter.name}</td>
-                              <td className="py-2 px-6">{waiter.status}</td>
-                              <td className="py-2 px-6">{waiter.currentTableCount}</td>
-                              <td className="py-2 px-6 flex gap-2">
-                                <Button
-                                  variant="outline"
-                                  className="text-blue-500"
-                                  onClick={() => handleEditClick(waiter)}
-                                  aria-label="Edit"
-                                >
-                                  <Edit size={18} />
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  className="text-red-500"
-                                  onClick={() => handleDeleteClick(waiter._id)}
-                                  aria-label="Delete"
-                                >
-                                  <Trash size={18} />
-                                </Button>
-                              </td>
-                            </>
-                          )}
-                        </tr>
-                      ))
-                    )}
-                </tbody>
+                ) : (
+                  paginatedWaiters.map((waiter) => (
+                    <tr key={waiter._id} className="border-t hover:bg-gray-50">
+                      {editingWaiterId === waiter._id ? (
+                        <>
+                          <td className="py-2 px-6">
+                            <input
+                              type="text"
+                              name="name"
+                              value={editFormData.name}
+                              onChange={handleInputChange}
+                              className="border rounded px-2 py-1 w-full"
+                            />
+                          </td>
+                          <td className="py-2 px-6">
+                            <select
+                              name="status"
+                              value={editFormData.status}
+                              onChange={handleInputChange}
+                              className="border rounded px-2 py-1 w-full"
+                            >
+                              <option value="available">available</option>
+                              <option value="occupied">occupied</option>
+                            </select>
+                          </td>
+                          <td className="py-2 px-6">
+                            <input
+                              type="number"
+                              name="currentTableCount"
+                              value={editFormData.currentTableCount}
+                              onChange={handleInputChange}
+                              className="border rounded px-2 py-1 w-full"
+                              min={0}
+                            />
+                          </td>
+                          <td className="py-2 px-6">
+                            {waiter.currentTables && waiter.currentTables.length > 0
+                              ? waiter.currentTables.join(', ')
+                              : 'N/A'}
+                          </td>
+                          <td className="py-2 px-6 flex gap-2">
+                            <button
+                              onClick={() => handleSaveClick(waiter._id)}
+                              disabled={actionLoading}
+                              className="bg-green-500 text-white px-3 py-1 rounded"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={handleCancelClick}
+                              disabled={actionLoading}
+                              className="bg-gray-400 text-white px-3 py-1 rounded"
+                            >
+                              Cancel
+                            </button>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="py-2 px-6">{waiter.name}</td>
+                          <td className="py-2 px-6">{waiter.status}</td>
+                          <td className="py-2 px-6">{waiter.currentTableCount}</td>
+                          <td className="py-2 px-6">
+                            {waiter.currentTables && waiter.currentTables.length > 0
+                              ? waiter.currentTables.join(', ')
+                              : 'N/A'}
+                          </td>
+                          <td className="py-2 px-6 flex gap-2">
+                            <Button
+                              variant="outline"
+                              className="text-blue-500"
+                              onClick={() => handleEditClick(waiter)}
+                              aria-label="Edit"
+                            >
+                              <Edit size={18} />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              className="text-red-500"
+                              onClick={() => handleDeleteClick(waiter._id)}
+                              aria-label="Delete"
+                            >
+                              <Trash size={18} />
+                            </Button>
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  ))
+                )}
+            </tbody>
               </table>
             </div>
 
