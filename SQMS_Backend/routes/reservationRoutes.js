@@ -1,5 +1,5 @@
 import express from 'express';
-import { createReservation, updateReservation, getMyReservation, cancelReservation, getReservationById, checkInReservation,completeReservation, getReservationByQuery, saveFeedback } from '../controllers/reservationController.js';
+import { createReservation, updateReservation, getMyReservation, cancelReservation, getReservationById, checkInReservation,completeReservation, getReservationByQuery, saveFeedback, createWalkInReservation } from '../controllers/reservationController.js';
 import { protect } from '../middleware/auth.js';
 import { isAdmin } from '../middleware/isAdmin.js';
 
@@ -7,6 +7,10 @@ const router = express.Router();
 
 // POST /api/reservations → Create reservation
 router.post('/', protect, createReservation);
+
+
+// POST /api/reservations/walkin → Create reservation
+router.post('/walkin',createWalkInReservation)
 
 // PUT /api/reservations/:id → Update reservation
 router.put('/:id', protect, updateReservation);
@@ -30,7 +34,6 @@ router.post('/:id/checkout',protect,completeReservation );
 
 // POST /api/reservations/:id/feedback → Save feedback for reservation
 router.post('/:id/feedback', protect, saveFeedback);
-
 
 
 export default router;

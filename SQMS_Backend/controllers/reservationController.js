@@ -34,6 +34,47 @@ const generateQRCode = async (reservation) => {
   return await QRCode.toDataURL(qrString);
 };
 
+// Create Walk-in Reservation (no auth)
+export const createWalkInReservation = async (req, res) => {
+  try {
+    const { name, phone, email, guests, specialRequests } = req.body;
+
+    if (!name || !phone || !email || !guests) {
+      return res.status(400).json({ message: 'Name, phone, email, and guests are required for walk-in reservation.' });
+    }
+
+    const now = new Date();
+    const date = format(now, 'yyyy-MM-dd');
+    const time = format(now, 'HH:mm');
+
+    const reservation = new Reservation({
+      name,
+      phone,
+      email,
+      guests,
+      specialRequests,
+      date,
+      time,
+      priority: false, // walk-in priority false
+      status: 'active',
+      payment: {
+        status: 'pending',
+        amount: 0,
+        transactionIds: [],
+      },
+      menu: [],
+    });
+
+    reservation.qrCode = await generateQRCode(reservation);
+    await reservation.save();
+
+    res.status(201).json({ reservation });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error creating walk-in reservation' });
+  }
+};
+
 const sendReservationEmail = async (user, reservation, qrCode, subject = 'Reservation Confirmation') => {
   const menuHtml = reservation.menu?.length
     ? `<table border="1" cellpadding="5" cellspacing="0" style="border-collapse: collapse;">

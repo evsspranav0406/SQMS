@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 const reservationSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   date: { type: String, required: true },
   time: { type: String, required: true },
   guests: { type: Number, required: true },
@@ -35,7 +35,8 @@ const reservationSchema = new mongoose.Schema({
     foodQuality: { type: Number, min: 1, max: 5 },
     ambiance: { type: Number, min: 1, max: 5 },
     date: { type: Date, default: Date.now }
-  }
+  },
+  priority: { type: Boolean, default: true } // true for advance booking, false for walk-in
 }, { timestamps: true });
 
 export default mongoose.model('Reservation', reservationSchema);

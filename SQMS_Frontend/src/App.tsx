@@ -25,6 +25,8 @@ import PaymentPage from './pages/Payment';
 import AdminCheckin from './pages/AdminCheckin';
 import AdminTableAdd from './pages/AdminTableAdd';
 import AdminWaiterAdd from './pages/AdminWaiterAdd';
+import WalkInReservation from './pages/WalkInReservation';
+
 const queryClient = new QueryClient();
 
 import IdleTimer from './components/IdleTimer';
@@ -42,7 +44,7 @@ const App = () => (
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/login" element={<Login />} />
           <Route path="/reset-password/:token" element={<ResetPassword />} />
-
+          <Route path="/walk-in" element={<WalkInReservation />}/>
           {/* Protected Routes */}
           <Route
             path="/reserve"
