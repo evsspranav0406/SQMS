@@ -64,15 +64,12 @@ app.use('/api/waiters', waiterRoutes);
 
 // Socket.io connection
 io.on('connection', (socket) => {
-  console.log('A user connected:', socket.id);
 
   socket.on('joinRoom', (userId) => {
     socket.join(userId);
-    console.log(`User ${userId} joined room ${userId}`);
   });
 
   socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
   });
 });
 

@@ -12,6 +12,7 @@ const AdminCheckin = () => {
   const [reservationsList, setReservationsList] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
+  const [checkinLoading, setCheckinLoading] = useState(false);
   const navigate = useNavigate();
 
   const handleScan = async (data) => {
@@ -89,18 +90,17 @@ const AdminCheckin = () => {
   const handleCheckin = async () => {
     if (!reservationData) return;
     const reservationId = reservationData._id;
-    console.log(reservationId)
     if (!reservationId) {
       toast.error('Invalid reservation data');
       return;
     }
     const token = localStorage.getItem('adminToken');
-    console.log(token)
     if (!token || !isTokenValid(token)) {
       toast.error('Admin token missing or expired. Please login again.');
       navigate('/admin/login');
       return;
     }
+    setCheckinLoading(true);
     try {
       // Send full reservationData for validation
       await axios.post(`http://localhost:5000/api/reservations/${reservationId}/checkin`, reservationData, {
@@ -117,10 +117,16 @@ const AdminCheckin = () => {
       if (error.response?.status === 401) {
         toast.error('Unauthorized. Please login again.');
         navigate('/admin/login');
+      } else if (error.response?.data?.message === 'No suitable table available') {
+        toast.error('No tables are currently available. Please try again later.');
+      } else if (error.response?.data?.message === 'No available waiter') {
+        toast.error('No waiters are currently available. Please try again later.');
       } else {
         toast.error(error.response?.data?.message || error.message || 'Check-in failed');
       }
       setScanning(false);
+    } finally {
+      setCheckinLoading(false);
     }
   };
 
@@ -243,9 +249,10 @@ const AdminCheckin = () => {
               </button>
               <button
                 onClick={handleCheckin}
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                disabled={checkinLoading}
+                className={`px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 ${checkinLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
-                Check-in
+                {checkinLoading ? 'Checking in...' : 'Check-in'}
               </button>
             </div>
           </div>
